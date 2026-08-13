@@ -11,6 +11,19 @@ const admin = require('firebase-admin');
 const serviceAccountPath =
   process.env.FIREBASE_SERVICE_ACCOUNT_PATH || process.env.GOOGLE_APPLICATION_CREDENTIALS;
 
+// Render's ephemeral filesystem cannot safely hold a committed service-account file.
+// Production hosting may therefore supply the exact service-account JSON as the
+// `FIREBASE_SERVICE_ACCOUNT_JSON` secret environment variable instead.
+function readServiceAccountFromEnvironment() {
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON: ${error.message}`);
+  }
+}
+
 function configureLocalEmulators() {
   if (process.env.NODE_ENV === 'local') {
     process.env.FIRESTORE_EMULATOR_HOST = 'localhost:8080';
@@ -41,9 +54,16 @@ if (!admin.apps.length) {
       databaseURL: process.env.FIREBASE_DATABASE_URL,
     };
 
-    if (serviceAccountPath) {
+    const serviceAccountFromEnv = readServiceAccountFromEnvironment();
+    if (serviceAccountFromEnv) {
+      initOptions.credential = admin.credential.cert(serviceAccountFromEnv);
+    } else if (serviceAccountPath) {
       const serviceAccount = require(serviceAccountPath);
       initOptions.credential = admin.credential.cert(serviceAccount);
+    } else {
+      throw new Error(
+        'Firebase Admin credentials are required: set FIREBASE_SERVICE_ACCOUNT_JSON or FIREBASE_SERVICE_ACCOUNT_PATH.',
+      );
     }
 
     admin.initializeApp(initOptions);

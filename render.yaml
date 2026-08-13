@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: shytalk-api
+    runtime: node
+    region: frankfurt
+    plan: free
+    rootDir: express-api
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: FIREBASE_PROJECT_ID
+        value: vip-9253b
+      - key: FIREBASE_DATABASE_URL
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        value: shytalk-media
+      - key: CDN_URL
+        value: https://images.shytalk.shyden.co.uk
+      - key: LIVEKIT_KEY_ASIA
+        sync: false
+      - key: LIVEKIT_SECRET_ASIA
+        sync: false
+      - key: LIVEKIT_URL_ASIA
+        value: wss://livekit.shytalk.shyden.co.uk
+      - key: LIVEKIT_KEY_EU
+        sync: false
+      - key: LIVEKIT_SECRET_EU
+        sync: false
+      - key: LIVEKIT_URL_EU
+        value: wss://livekit-eu.shytalk.shyden.co.uk
+      - key: ALLOWED_ORIGINS
+        value: https://shytalk.shyden.co.uk
+      - key: SITE_BASE_URL
+        value: https://shytalk.shyden.co.uk
+      - key: API_BASE_URL
+        sync: false

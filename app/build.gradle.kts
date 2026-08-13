@@ -93,7 +93,7 @@ android {
             // for hackability notes (defence-in-depth, server-side gates
             // remain enforced regardless of this flag).
             buildConfigField("Boolean", "BYPASS_EMULATOR_GATE", "false")
-            buildConfigField("String", "WEB_CLIENT_ID", "\"517834977595-cdu78p6q7vg57utpsvtik04c195lbh8b.apps.googleusercontent.com\"")
+            buildConfigField("String", "WEB_CLIENT_ID", "\"693386631478-f5mu89pabtscn3j1irofg6bol9cn6g7s.apps.googleusercontent.com\"")
             buildConfigField("String", "RTDB_URL", "\"https://shytalk-7ba69-default-rtdb.asia-southeast1.firebasedatabase.app\"")
             buildConfigField("String", "EMAIL_LINK_DOMAIN", "\"shytalk.shyden.co.uk\"")
             buildConfigField("String", "LOCAL_HOST", "\"\"")
@@ -162,8 +162,9 @@ android {
             buildConfigField("Boolean", "BYPASS_EMULATOR_GATE", "true")
         }
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // Use -Pshytalk.enableMinification=false only on memory-constrained build hosts.
+            isMinifyEnabled = (project.findProperty("shytalk.enableMinification") as? String)?.toBoolean() ?: true
+            isShrinkResources = (project.findProperty("shytalk.enableMinification") as? String)?.toBoolean() ?: true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
