@@ -1,0 +1,2848 @@
+/* eslint-disable no-console -- driver methods log diagnostics for the
+   manual QA runner (operator-facing CLI), not application code. */
+/* eslint-disable sonarjs/no-os-command-from-path -- `adb` is the Android
+   Debug Bridge CLI; resolving via PATH is the standard pattern.
+   Operator-installed; not user input. */
+/**
+ * Android driver backed by `adb` (shell + uiautomator).
+ *
+ * Exposes the ctx.uiDriver methods that manual-qa-runner.js matchers
+ * call for Android scenarios. The current implementation is a SCAFFOLD:
+ * every method name from the matcher contract is wired to a stub that
+ * returns false + logs a clear "not implemented" message. As scenarios
+ * are exercised end-to-end, methods get real implementations one at a
+ * time (input tap, uiautomator dump, am start, intent broadcast).
+ *
+ * Wiring contract:
+ *   - `createAndroidDriver({ serial })` selects which adb device to drive.
+ *   - Defaults to `adb-3b402284-56nfBT._adb-tls-connect._tcp` (the
+ *     wireless physical device the operator has connected). Falls back
+ *     to the first emulator if that serial isn't visible.
+ *   - Methods accept the persona name as their first arg (matcher
+ *     convention).
+ *
+ * Tooling notes:
+ *   - `adb shell input tap X Y`              — taps a coordinate
+ *   - `adb shell uiautomator dump --compressed /sdcard/dump.xml &&
+ *      adb pull /sdcard/dump.xml -`          — gets the view tree
+ *   - `adb shell am start -n pkg/.Activity`  — launches activity
+ *   - `adb shell am broadcast -a ...`        — broadcasts intent
+ *
+ * The driver doesn't currently know which Activity each "screen"
+ * corresponds to — that mapping needs to come from the app's
+ * navigation registry. For now, methods log "not implemented" and the
+ * runner surfaces a finding listing the matcher and the missing call.
+ */
+const { execSync } = require('child_process');
+
+function selectSerial(preferredSerial) {
+  let devices;
+  try {
+    // is the Android Debug Bridge CLI; resolving it via PATH is the
+    // standard pattern. Operator-installed; not user-supplied input.
+    devices = execSync('adb devices', { encoding: 'utf8' });
+  } catch (_e) {
+    return null;
+  }
+  const lines = devices.split('\n').filter((l) => /\tdevice$/.test(l));
+  if (lines.length === 0) return null;
+  const serials = lines.map((l) => l.split('\t')[0]);
+  if (preferredSerial && serials.includes(preferredSerial)) return preferredSerial;
+  // Prefer wireless TLS-connect device, then emulator.
+  const wireless = serials.find((s) => s.includes('_adb-tls-connect'));
+  if (wireless) return wireless;
+  const emulator = serials.find((s) => s.startsWith('emulator-'));
+  if (emulator) return emulator;
+  return serials[0];
+}
+
+/**
+ * Classify the ShyTalk Android app's auth/screen state from a uiautomator
+ * UI dump, so androidPersonaSignIn can decide whether to proceed to the
+ * picker, sign out first, clear a gate, or wait. Pure string→enum (no I/O)
+ * so it is unit-tested against REAL device-captured dumps (SHY-0096).
+ *
+ * Returned states (checked in precedence order — most-blocking first):
+ *   - 'warning'    — a moderation warning gate is shown over the session
+ *                    (`warning_acknowledgeButton`). Must win over signed_in so
+ *                    the caller signs out/acknowledges rather than treating the
+ *                    user as fully on main.
+ *   - 'splash'     — the launch intro screen (`splash_continueButton`), shown
+ *                    on cold start before the picker/main resolves. A transient
+ *                    gate the caller dismisses (tap Continue) then re-classifies.
+ *   - 'legal_gate' — fresh-install legal-acceptance screen
+ *                    (`legal_continueButton` / `legal_accept*Checkbox`).
+ *   - 'picker'     — signed-out sign-in screen with the test-persona picker
+ *                    (`persona_picker_open` / `signIn_googleButton`). Wins over
+ *                    a stray main_* fragment so a visible picker isn't masked.
+ *   - 'signed_in'  — on the main app (`main_roomsTab`/`main_profileTab`/
+ *                    `main_settingsButton`).
+ *   - 'unknown'    — none of the above (splash, system permission dialog,
+ *                    empty/raced dump). Caller waits-and-re-dumps; never acts.
+ *
+ * Note: system permission dialogs (`com.android.permissioncontroller`) are the
+ * foreground window during onboarding and dump as a sparse tree with none of
+ * these tags → 'unknown' (correct: the caller dismisses them, then re-dumps).
+ */
+function classifyAndroidAuthState(dumpXml) {
+  const x = String(dumpXml || '');
+  if (x.includes('warning_acknowledgeButton')) return 'warning';
+  if (x.includes('splash_continueButton')) return 'splash';
+  if (x.includes('legal_continueButton') || x.includes('legal_acceptTermsCheckbox')) {
+    return 'legal_gate';
+  }
+  if (x.includes('persona_picker_open') || x.includes('signIn_googleButton')) return 'picker';
+  if (
+    x.includes('main_roomsTab') ||
+    x.includes('main_profileTab') ||
+    x.includes('main_settingsButton')
+  ) {
+    return 'signed_in';
+  }
+  return 'unknown';
+}
+
+/**
+ * ShyTalk Android package id per target. local → `.local`, dev → `.dev`,
+ * prod → bare (no suffix). Mirrors applicationIdSuffix at
+ * app/build.gradle.kts. Shared by androidPersonaSignIn + androidSignOut.
+ */
+const PACKAGE_BY_TARGET = {
+  local: 'com.shyden.shytalk.local',
+  dev: 'com.shyden.shytalk.dev',
+  prod: 'com.shyden.shytalk',
+};
+
+/**
+ * Method-name list the runner expects on ctx.uiDriver for Android
+ * scenarios. Extracted by grepping `androidXxx:` patterns in
+ * manual-qa-runner.js. Each name maps to a stub returning false +
+ * log; real implementations replace stubs incrementally.
+ */
+const ANDROID_METHOD_NAMES = [
+  // Wake 86-106 vocabulary (matcher contract):
+  'androidAdminShowsAppealText',
+  'androidAdminShowsDashboardCounters',
+  'androidAdminShowsNewReportInQueue',
+  'androidAdminShowsRowCountInTable',
+  'androidAdminShowsRowForWithStatus',
+  'androidAdminShowsStat',
+  'androidAdminShowsTableOf',
+  'androidAlsoShowsInParticipantsList',
+  'androidApproveSeatRequest',
+  'androidContinuesNormallyInRoom',
+  'androidDisablesInput',
+  'androidIsNoLongerInVoiceRoom',
+  'androidIsStillInRoom',
+  'androidJoinEventRoom',
+  'androidNavigatesBackToTab',
+  'androidNavigatesToPath',
+  'androidNavigatesToProfileScreen',
+  'androidNavigatesToRoomScreen',
+  'androidNavigatesToWarningScreen',
+  'androidOpenProfileAndTap',
+  'androidOpenProfileFrom',
+  'androidOpensTab',
+  'androidRefreshLanguageRail',
+  'androidReplacesFollowButton',
+  'androidShowsBalanceViaListener',
+  'androidShowsBanner',
+  'androidShowsBeansPerWeekChart',
+  'androidShowsContributorsList',
+  'androidShowsCountBadge',
+  'androidShowsEditedBodyWithTag',
+  'androidShowsFrozenBanner',
+  'androidShowsGiftFromSender',
+  'androidShowsInAppGiftNotification',
+  'androidShowsInResults',
+  'androidShowsInSeatGrid',
+  'androidShowsInThread',
+  'androidShowsMessageInConversationThread',
+  'androidShowsMicIconAs',
+  'androidShowsNamedKind',
+  'androidShowsNewGiftEntry',
+  'androidShowsNewUnreadConversation',
+  'androidShowsNonEmptyLocaleText',
+  'androidShowsOfficialBadge',
+  'androidShowsOnlyMinorCohortInRankings',
+  'androidShowsOwnRankInTop',
+  'androidShowsPmThreadDirection',
+  'androidShowsRoomClosedSummary',
+  'androidShowsRoomWarningBanner',
+  'androidShowsSecondOffensiveMessage',
+  'androidShowsSeatRequestNotification',
+  'androidShowsSeatWithIndicator',
+  'androidShowsStalkersDelta',
+  'androidShowsSystemPmFromOfficia',
+  'androidShowsToastAndNavigates',
+  'androidShowsToastAndNavigatesBack',
+  'androidShowsUserCard',
+  'androidShowsUserCardSkeletons',
+  'androidShowsWarningScreenOnRelaunch',
+  'androidShowsWarningScreenWithReason',
+  'androidShowsWelcomePmInLanguage',
+  'androidSubmitStarFeedback',
+  'androidTapFromSurface',
+  // From cycle-10 failure histogram:
+  'androidOpenScreen',
+  'androidTapByTag',
+  'androidSearchIn',
+  'androidScanAllRenderedStrings',
+  // Network-state manipulation (j09: host disconnect → room auto-close).
+  // Pairs `svc wifi disable` + `svc data disable` to fully drop the
+  // device's connectivity, then re-enables both after a sleep.
+  'androidNetworkDropFor',
+  // Tap + long-press actions for j09's room-host kick/close/join flows.
+  'androidTapQuotedTarget',
+  'androidTapRoomCard',
+  'androidLongPressSeat',
+  // j09 + every journey Background's "<persona> is signed in on
+  // Android physical at the <tab> tab" — drives the persona picker
+  // (visible on local + dev since PR #882) to sign the device's APP
+  // into the named persona, then taps the requested main-nav tab.
+  // Distinct from the Firebase REST sign-in the runner does on the
+  // server side: that gets a token into ctx.sessions; this one drives
+  // the device APP's UI through the picker dialog so the device is
+  // on the right screen for subsequent UI-action steps.
+  'androidPersonaSignIn',
+  // Generic "confirm in the dialog" tap. Used by j09's close-room flow
+  // ("When Theo on Android confirms in the dialog" — line 107) and any
+  // future scenario gating a destructive action behind an AlertDialog.
+  // Tries a stack of known confirm-button testTags before failing — the
+  // exact testTag varies by surface (room_endRoomConfirmButton vs
+  // settings_signOutConfirmButton vs dialog_confirmButton, etc.).
+  'androidConfirmDialog',
+  // j10/j11 moderation journeys: force-stop + cold-relaunch the app so its
+  // startup routing re-reads a seeded moderation flag (a freshly seeded
+  // hasActiveWarning surfaces the warning screen only on a fresh launch).
+  'androidKillAndRelaunch',
+];
+
+function listMethods() {
+  return [...new Set(ANDROID_METHOD_NAMES)].sort();
+}
+
+/**
+ * Create an Android driver instance.
+ *
+ *   const driver = await createAndroidDriver();
+ *   ctx.uiDriver = driver;
+ *
+ * Real implementations land per-scenario. Currently all methods
+ * return false + log "not implemented" so the runner produces a
+ * concrete finding for each step rather than crashing.
+ */
+async function createAndroidDriver({ serial: preferred } = {}) {
+  const serial = selectSerial(preferred);
+  if (!serial) {
+    throw new Error('No Android device connected (adb devices empty)');
+  }
+  const driver = { _serial: serial };
+
+  function adb(args) {
+    const cmd = ['adb', '-s', serial, ...args].map((a) => `'${a}'`).join(' ');
+    return execSync(cmd, { encoding: 'utf8' });
+  }
+  driver.adb = adb;
+
+  // Wire reverse port-forwards so wireless devices can reach
+  // laptop-hosted local services (Express API, Firebase emulators,
+  // LiveKit, MinIO). Without these, the app on a wireless device hits
+  // a Technical-Difficulties screen because localhost on the DEVICE
+  // is the device itself, not the laptop. Mirrors CLAUDE.md guidance
+  // for "Android on physical device".
+  for (const port of [3000, 7880, 9000, 8080, 9099, 9002]) {
+    try {
+      adb(['reverse', `tcp:${port}`, `tcp:${port}`]);
+    } catch (e) {
+      console.error(`[android-driver] adb reverse tcp:${port} failed: ${e.message}`);
+    }
+  }
+
+  for (const methodName of listMethods()) {
+    driver[methodName] = async (...args) => {
+      console.error(
+        `[android-driver] stub:${methodName}(${args.map((a) => JSON.stringify(a)).join(', ')}) — not implemented yet (device=${serial})`,
+      );
+      return false;
+    };
+  }
+
+  // ── Real primitive implementations (override stubs) ─────────────────
+
+  // Dump the current screen's view hierarchy via uiautomator. Returns
+  // the raw XML string. Used by tag-targeted tap + assertion matchers
+  // that scan for resource-id + bounds.
+  driver.androidUiDump = async () => {
+    try {
+      adb(['shell', 'uiautomator', 'dump', '--compressed', '/sdcard/dump.xml']);
+      const xml = adb(['shell', 'cat', '/sdcard/dump.xml']);
+      return xml;
+    } catch (e) {
+      console.error(`[android-driver] androidUiDump failed: ${e.message}`);
+      return '';
+    }
+  };
+
+  // Tap at coordinate. Matchers compute (x, y) from the view dump's
+  // bounds and call this primitive.
+  driver.androidTap = async (x, y) => {
+    try {
+      adb(['shell', 'input', 'tap', String(Math.round(x)), String(Math.round(y))]);
+      return true;
+    } catch (e) {
+      console.error(`[android-driver] androidTap(${x},${y}) failed: ${e.message}`);
+      return false;
+    }
+  };
+
+  // Dump the UI tree, find the bounds of the element with the given
+  // resource-id (accepts short OR fully-qualified shapes), tap centre.
+  // Returns true if found+tapped, false otherwise. Single-call replacement
+  // for the dump+regex+tap dance many matchers do; future matchers should
+  // call this instead of duplicating the logic.
+  driver.androidTapByTag = async (tag) => {
+    try {
+      const dump = await driver.androidUiDump();
+      const escTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+      const re = new RegExp(
+        `resource-id="(?:[^"]*:id/)?${escTag}"[^<]*?bounds="\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]"`,
+      );
+      const match = re.exec(dump);
+      if (!match) return false;
+      const [, x1, y1, x2, y2] = match.map((v, i) => (i === 0 ? v : Number(v)));
+      const cx = Math.round((x1 + x2) / 2);
+      const cy = Math.round((y1 + y2) / 2);
+      return await driver.androidTap(cx, cy);
+    } catch (e) {
+      console.error(`[android-driver] androidTapByTag(${tag}) failed: ${e.message}`);
+      return false;
+    }
+  };
+
+  // Shared main-nav tab tapper used by both androidNavigatesBackToTab
+  // (Wake 100, "<Name>'s Android UI navigates back to the <tab> tab")
+  // and androidOpensTab (Wake 92, "<Name> [P-NN] (cohort) opens the
+  // <tab> tab on Android"). Mechanically identical — both matchers
+  // map to "tap the bottom-nav tab with the given name" — but kept
+  // as separate driver methods so future divergence (e.g. "open" may
+  // one day launch a full activity while "navigate back" stays a pure
+  // tap) doesn't need API churn.
+  //
+  // Candidate testTag forms tried in order:
+  //   1. `main_<lowered>Tab` — the ACTUAL pattern in
+  //      shared/src/commonMain/kotlin/.../feature/main/MainScreen.kt
+  //      lines 102/127/134: `main_roomsTab`, `main_messagesTab`,
+  //      `main_profileTab`. This MUST be first — the others are
+  //      fallbacks only.
+  //   2-4. Generic fallbacks for any future surface that doesn't
+  //      follow the main-nav convention.
+  // First match wins.
+  async function tapMainNavTab(label, tab) {
+    const lowered = tab.toLowerCase();
+    const candidates = [`main_${lowered}Tab`, lowered, `tab_${lowered}`, `bottomNav_${lowered}`];
+    for (const candidate of candidates) {
+      if (await driver.androidTapByTag(candidate)) {
+        // Brief settle so the tab content can draw before subsequent
+        // dump/tap calls. Mirrors androidOpenScreen's 1.5s wait but
+        // shorter — tabs swap in-place without a full activity launch.
+        await new Promise((r) => setTimeout(r, 500));
+        return true;
+      }
+    }
+    console.error(
+      `[android-driver] ${label}(${tab}) — no testTag matched any of ${candidates.join(', ')}`,
+    );
+    return false;
+  }
+
+  driver.androidNavigatesBackToTab = async (_name, tab) =>
+    tapMainNavTab('androidNavigatesBackToTab', tab);
+
+  driver.androidOpensTab = async (_name, tab) => tapMainNavTab('androidOpensTab', tab);
+
+  // Wake 97 — "<Name>'s Android UI shows a "<X>" banner". Generic
+  // banner-text presence assertion. Banners persist on-screen until
+  // dismissed (unlike toasts), so a single dump scan is sufficient.
+  //
+  // Implementation: dump the UI tree, look for the banner text as
+  // either a `text=` or `content-desc=` attribute value (icon-only
+  // banners often carry the message in content-desc for accessibility).
+  // Substring match — banners frequently contain dynamic suffixes
+  // ("...in 5 minutes", "(retry)"), so an exact-match would be too
+  // strict. The banner-text input is regex-escaped to handle dynamic
+  // characters in the assertion string itself (parens, dots, etc.).
+  //
+  // Round 1 review I-2 fix: the regex uses a `(?<![\w-])` negative
+  // lookbehind before `(?:text|content-desc)=` so attribute names
+  // like `hint-text=`, `sub-text=`, `error-text=` don't false-match
+  // via their `text=` suffix. Only top-level `text=` and
+  // `content-desc=` attributes (preceded by `<node `, whitespace,
+  // or start-of-string — anything not a word char or hyphen) match.
+  //
+  // Round 1 review M-2: empty banner string returns false. A scenario
+  // asking for `""` banner is a scenario authoring error; the prior
+  // behaviour (matching any node with text="..." or content-desc="...")
+  // would silently mask the bug.
+  driver.androidShowsBanner = async (_name, banner) => {
+    // Round 2 M-1: also guard against whitespace-only strings. A
+    // banner of `'   '` would otherwise pass `!banner` and match
+    // any node with 3+ consecutive spaces in its text attribute
+    // — silent false positive. The runner regex requires `[^"]+`
+    // so this isn't reachable from valid Gherkin, but cheap to
+    // guard defensively.
+    if (!banner || !banner.trim()) return false;
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+    const escBanner = banner.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    return new RegExp(`(?<![\\w-])(?:text|content-desc)="[^"]*${escBanner}[^"]*"`).test(dump);
+  };
+
+  // Generic "does the UI dump contain ANY of these resource-id
+  // testTags?" predicate. Handles both the package-qualified form
+  // (`resource-id="com.shyden.shytalk.local:id/<tag>"`) and the
+  // bare form (`resource-id="<tag>"`). First match wins.
+  //
+  // Shared by every screen-presence assertion (room, warning, profile,
+  // etc.). Centralising the regex means CRLF/quote/anchor concerns
+  // live in one place and Phase 4 methods that follow can just pass
+  // a marker list.
+  function dumpHasAnyMarker(dump, markers) {
+    return markers.some((m) => new RegExp(`resource-id="(?:[^"]*:id/)?${m}"`).test(dump));
+  }
+
+  // Room-screen markers (grounded to real Compose testTags):
+  //   - room_seatGrid (RoomScreen.kt:718) — central body component
+  //   - room_roomName (RoomToolbar.kt:60) — toolbar title
+  //   - room_backButton (RoomToolbar.kt:84) — toolbar back button
+  // Listing multiple defends against partial-render race conditions
+  // (e.g. toolbar drawn but seat grid still loading).
+  const ROOM_MARKERS = ['room_seatGrid', 'room_roomName', 'room_backButton'];
+  function isInRoomScreen(dump) {
+    return dumpHasAnyMarker(dump, ROOM_MARKERS);
+  }
+
+  // Warning-screen markers (WarningScreen.kt testTags):
+  //   - warning_title (line 82)
+  //   - warning_communityStandardsLink (line 112)
+  //   - warning_acknowledgeButton (line 123)
+  const WARNING_MARKERS = [
+    'warning_title',
+    'warning_communityStandardsLink',
+    'warning_acknowledgeButton',
+  ];
+  function isOnWarningScreen(dump) {
+    return dumpHasAnyMarker(dump, WARNING_MARKERS);
+  }
+
+  // Profile-screen markers (ProfileScreen.kt testTags):
+  //   - profile_displayName (lines 507, 992) — title text
+  //   - profile_walletButton (line 1146)
+  //   - profile_followButton (lines 1179, 1188)
+  //   - profile_messageButton (line 1198)
+  const PROFILE_MARKERS = [
+    'profile_displayName',
+    'profile_walletButton',
+    'profile_followButton',
+    'profile_messageButton',
+  ];
+  function isOnProfileScreen(dump) {
+    return dumpHasAnyMarker(dump, PROFILE_MARKERS);
+  }
+
+  // Wake 84 — "<Name>'s Android UI is still in the room".
+  driver.androidIsStillInRoom = async (_name) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+    return isInRoomScreen(dump);
+  };
+
+  // Wake 105 — "<Name>'s Android UI is no longer in the voice room".
+  // Inverse of androidIsStillInRoom. CRITICALLY: returns false (not
+  // true) when the dump is empty — an empty dump means "can't
+  // confirm", not "confirmed gone". Otherwise a dump failure would
+  // incorrectly assert the user has left the room.
+  driver.androidIsNoLongerInVoiceRoom = async (_name) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+    return !isInRoomScreen(dump);
+  };
+
+  // Wake 101 (first variant) — "<Name>'s Android UI navigates to the
+  // warning screen". Presence assertion via WARNING_MARKERS.
+  driver.androidNavigatesToWarningScreen = async (_name) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+    return isOnWarningScreen(dump);
+  };
+
+  // Wake 101 (second variant) — "<Name>'s Android UI shows the
+  // warning screen again on next launch". Semantically distinct
+  // from navigates-to (this is post-relaunch persistence), but
+  // mechanically identical: assert the warning screen is currently
+  // visible. Both methods share isOnWarningScreen via the marker
+  // helper so the testTag contract stays in one place.
+  driver.androidShowsWarningScreenOnRelaunch = async (_name) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+    return isOnWarningScreen(dump);
+  };
+
+  // Wake 102 — `<Name>'s Android UI shows the warning screen with
+  // reason "<X>"`. j11 — punished user sees moderation reason.
+  // TWO assertions in one method:
+  //   1. The warning screen is currently visible (isOnWarningScreen)
+  //   2. The reason text appears in some text= or content-desc=
+  //      attribute (substring match, same shape as androidShowsBanner).
+  // Both must hold. Reason is regex-escaped so dynamic chars (parens,
+  // dots, ellipsis) match literally. Empty/whitespace-only reason
+  // short-circuits to false.
+  driver.androidShowsWarningScreenWithReason = async (_name, reason) => {
+    if (!reason || !reason.trim()) return false;
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+    if (!isOnWarningScreen(dump)) return false;
+    const escReason = reason.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    return new RegExp(`(?<![\\w-])(?:text|content-desc)="[^"]*${escReason}[^"]*"`).test(dump);
+  };
+
+  // Wake 96 — "<Name>'s Android UI navigates to the profile screen".
+  // Presence assertion via PROFILE_MARKERS.
+  driver.androidNavigatesToProfileScreen = async (_name) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+    return isOnProfileScreen(dump);
+  };
+
+  // Wake 99 — `<Name>'s Android UI navigates to the room screen
+  // <suffix>`. j09 — 2 corpus rows with descriptive suffixes:
+  //   - "with host seat occupied"
+  //   - "as a non-seated participant"
+  // The suffix is scenario-reader METADATA, not UI text. It would
+  // never appear in a `text=`/`content-desc=` attribute, so attempting
+  // to substring-match it into the dump would false-fail every call.
+  // Driver asserts ROOM_MARKERS presence only and ignores the suffix.
+  //
+  // FUTURE: a follow-up PR can layer suffix-aware refinement on top
+  // (e.g. for "with host seat occupied", additionally inspect the
+  // seat-1 subtree for a non-empty avatar element). Done as a layer,
+  // not a replacement, so the foundation assertion stays sound.
+  driver.androidNavigatesToRoomScreen = async (_name, _suffix) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+    return isInRoomScreen(dump);
+  };
+
+  // Wake 105 — "<Name>'s Android UI continues normally in the room"
+  // (j10). Semantic: actor is unaffected by a mid-room moderation
+  // event — still IN the room AND not on a warning screen. Composes
+  // two existing predicates without introducing new markers.
+  //
+  // Precedence: warning beats room. If both ROOM_MARKERS and
+  // WARNING_MARKERS appear in the same dump (rare — warning sheet
+  // drawn over the still-mounted room), the user is NOT continuing
+  // normally because the warning blocks interaction.
+  //
+  // FUTURE axis: "input disabled / frozen overlay while still in
+  // room" has no Compose testTag yet — only `privateChat_frozenBanner`
+  // exists, and that's the messaging surface, not the voice room.
+  // Layer this third axis once the testTag lands (likely surfaced
+  // during Phase 10 real journey-testing).
+  driver.androidContinuesNormallyInRoom = async (_name) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+    if (isOnWarningScreen(dump)) return false;
+    return isInRoomScreen(dump);
+  };
+
+  // Wake 103 — `<Name>'s Android UI shows mic icon as "<X>"` (j09
+  // host mic on/off, j10 warning auto-mutes, j15 MC unmutes between
+  // sets). Inspects the `room_micToggleButton` IconButton's
+  // contentDescription (ChatPanel.kt:325-332) to determine state.
+  //
+  // The Compose contentDescription is the action a user would take
+  // on tap, so the displayed STATE is the inverse:
+  //   - contentDescription "Mute"              → mic is currently OPEN
+  //   - contentDescription "Unmute"            → mic is currently MUTED
+  //   - contentDescription "Voice unavailable" → mic is CLOSED
+  //
+  // Foundation policy: English (en-US) `local` flavor only.
+  // Locale-aware expansion belongs in this map (driver-side), not
+  // the runner — the Gherkin `state` arg is a stable literal.
+  //
+  // Attribute-order tolerance: uiautomator dump's attribute ordering
+  // is not contractually fixed. The impl uses a TWO-STEP extraction:
+  // first capture the full <node ...> tag containing the testTag,
+  // then look for content-desc within that captured tag string.
+  // This is order-independent and survives uiautomator version drift.
+  const MIC_STATE_HINTS = {
+    open: ['Mute'],
+    muted: ['Unmute'],
+    closed: ['Voice unavailable'],
+  };
+  driver.androidShowsMicIconAs = async (_name, state) => {
+    if (!state) return false;
+    const hints = MIC_STATE_HINTS[state.toLowerCase()];
+    if (!hints) return false;
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?room_micToggleButton"[^>]*\/?>/;
+    const tagMatch = dump.match(tagRx);
+    if (!tagMatch) return false;
+    const descMatch = tagMatch[0].match(/content-desc="([^"]*)"/);
+    if (!descMatch) return false;
+    const contentDesc = descMatch[1];
+    // Round 1 I-1 fix: word-boundary match instead of bare
+    // `.includes()`. Plain substring match was vulnerable to prefix
+    // collisions — e.g. `"Auto-Unmute".includes("Unmute")` is true.
+    //
+    // Round 2 I-1 fix: conditional rule for multi-word hints. The
+    // word-boundary regex `(?<![\w-])${h}(?!\w)` only anchors at
+    // the OUTER edges of the hint string — so for a multi-word hint
+    // like "Voice unavailable", a content-desc value of
+    // "Enable Voice unavailable mode" matches (leading space passes
+    // the left lookbehind, trailing space passes the right lookahead).
+    // For multi-word hints, switch to exact (case-insensitive)
+    // match: Compose emits stable literal strings, and any padded
+    // form would be a regression in Compose, not an accessibility
+    // tool's padding. Single-word hints retain the word-boundary
+    // substring tolerance so accessibility-padded forms like
+    // "Mute mic" / "Currently: Mute" still match.
+    return hints.some((h) => {
+      if (h.includes(' ')) {
+        return contentDesc.toLowerCase() === h.toLowerCase();
+      }
+      const escH = h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+      return new RegExp(`(?<![\\w-])${escH}(?!\\w)`).test(contentDesc);
+    });
+  };
+
+  // Wake 100 — `<Name>'s Android UI shows the new "<X>" balance via
+  // Firestore listener` (j06 — wallet refresh via real-time listener).
+  // Inspects the `wallet_balance` node's `text=` and `content-desc=`
+  // attributes for the balance string.
+  //
+  // Balance shape: user-facing decimal with optional digit separators
+  // ("5,000"), currency prefix ("$5,000"), and label padding
+  // ("Balance: 5,000 coins"). Word-boundary regex prevents numeric-
+  // prefix collisions ("45,000" must NOT match "5,000") and numeric-
+  // suffix collisions ("5,0000" must NOT match "5,000"). Same boundary
+  // shape as androidShowsMicIconAs (PR #734) but applied across
+  // text= AND content-desc= since either can carry the value.
+  //
+  // Balance arg is regex-escaped — a "." in "1,234.56" matches a
+  // literal dot, not "any char" (decimal-point variant of the
+  // numeric-collision concern).
+  //
+  // Two-step extraction (PR #734 pattern): capture the wallet_balance
+  // node tag first, then scan its attributes. Attribute-order
+  // independent.
+  driver.androidShowsBalanceViaListener = async (_name, balance) => {
+    if (!balance || !balance.trim()) return false;
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?wallet_balance"[^>]*\/?>/;
+    const tagMatch = dump.match(tagRx);
+    if (!tagMatch) return false;
+    const escBalance = balance.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Scan within the captured tag for either text= or content-desc=
+    // carrying the balance value with digit-boundary protection.
+
+    const valueRx = new RegExp(`(?:text|content-desc)="[^"]*(?<![\\w-])${escBalance}(?!\\w)[^"]*"`);
+    return valueRx.test(tagMatch[0]);
+  };
+
+  // Wake 102 — `<Name>'s Android UI replaces follow button with
+  // "<X>"` (j07 — UI element swap after follow action completes).
+  // Inspects the `profile_followButton` testTag node's text= AND
+  // content-desc= attributes for the buttonId string.
+  //
+  // The buttonId is one of the four follow-state Compose strings
+  // (ProfileScreen.kt:1183, 1192): "Follow", "Unfollow", "Following",
+  // "Follow back". These have OVERLAPPING PREFIXES — "Follow" is a
+  // prefix of "Follow back" and "Following". Substring or word-
+  // boundary substring matching would false-positive across them
+  // (asserting "Follow" against a "Follow back" button would pass
+  // under word-boundary substring tolerance because of the space
+  // delimiter).
+  //
+  // Foundation design: EXACT (case-insensitive) match across either
+  // text= or content-desc= within the captured tag. The mic-icon's
+  // substring tolerance (PR #734) was for hypothetical accessibility
+  // padding; here the four states are mutually-exclusive labels and
+  // exact match is the safer foundation. If a future surface
+  // legitimately pads ("Follow • Alice"), this method's contract
+  // needs an explicit revision, not silent drift.
+  driver.androidReplacesFollowButton = async (_name, buttonId) => {
+    if (!buttonId || !buttonId.trim()) return false;
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?profile_followButton"[^>]*\/?>/;
+    const tagMatch = dump.match(tagRx);
+    if (!tagMatch) return false;
+    const target = buttonId.toLowerCase();
+    const attrRx = /(?:text|content-desc)="([^"]*)"/g;
+    for (const m of tagMatch[0].matchAll(attrRx)) {
+      if (m[1].toLowerCase() === target) return true;
+    }
+    return false;
+  };
+
+  // Wake 89 — `<Name>'s Android UI disables the <X> input` (j11:50).
+  // Parameterised input-control state assertion. The inputName arg
+  // is the bare control name ("chat", "comment", "gift", etc.),
+  // mapped to a Compose testTag via INPUT_TAGS.
+  //
+  // Currently only "chat" → "room_chatInput" is grounded
+  // (ChatPanel.kt:273). Unmapped names return false until a future
+  // Compose change lands the missing testTag — better to FAIL the
+  // assertion than silently match an unrelated node.
+  //
+  // Two-step extraction (PR #734 pattern): capture the input's node
+  // tag first, then scan for `enabled="false"` within it. The
+  // closing `"` anchors the right boundary so `enabled="falsey"` or
+  // similar values don't false-match.
+  const INPUT_TAGS = { chat: 'room_chatInput' };
+  driver.androidDisablesInput = async (_name, inputName) => {
+    if (!inputName || !inputName.trim()) return false;
+    const tag = INPUT_TAGS[inputName.toLowerCase()];
+    if (!tag) return false;
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = new RegExp(`<node[^>]*resource-id="(?:[^"]*:id\\/)?${tag}"[^>]*\\/?>`);
+    const tagMatch = dump.match(tagRx);
+    if (!tagMatch) return false;
+    // Round 1 I-2: `(?<![\w-])` negative lookbehind blocks compound
+    // attribute names ending in `enabled` (e.g. hyphenated forms
+    // like `pre-enabled="false"`). Mirrors the boundary shape used
+    // in androidShowsBanner's `text=` attribute guard. In current
+    // uiautomator vocabulary the standard `enabled` is the only
+    // such attribute, but the anchor defends against future surface
+    // growth without cost.
+
+    return /(?<![\w-])enabled="false"/.test(tagMatch[0]);
+  };
+
+  // Wake 99 — `<Name>'s Android UI[ opens conversation "<X>"] shows
+  // the frozen-banner element <suffix>` (j08, 4 corpus rows). Driver
+  // receives `(viewer, convId, suffix)` where convId is optional
+  // (null when no "opens conversation X" prefix in the Gherkin) and
+  // suffix is descriptive ("with text-from-key X" or "with locale
+  // string Y").
+  //
+  // Foundation policy: presence-check `privateChat_frozenBanner`
+  // testTag (PrivateChatScreen.kt:440) only. All three args are
+  // accepted-and-ignored at this layer — the assertion is "the
+  // frozen banner is currently visible". A future PR can layer
+  // text-from-key / locale-string verification once those contracts
+  // are clearer. Same shape as androidNavigatesToRoomScreen's
+  // suffix-ignore foundation (PR #732).
+  driver.androidShowsFrozenBanner = async (_viewer, _convId, _suffix) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?privateChat_frozenBanner"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 105 — `<Name>'s Android Admin UI shows the new report in
+  // the queue` (j11). Single-arg assertion that the admin queue
+  // contains at least one report. Foundation strategy combines two
+  // Compose testTags from the ReportReview screen:
+  //   - reportReview_list       — admin queue container (must be PRESENT)
+  //   - reportReview_emptyState — empty-list placeholder (must be ABSENT)
+  //
+  // Together these answer "the queue is non-empty", which is the
+  // closest foundation-layer interpretation of "shows the new
+  // report" without a `status="new"` testTag distinguishing
+  // freshly-filed from older reports. A future layer can add per-
+  // row inspection (e.g. via a `reportReview_row_${id}` parameterised
+  // testTag) to verify the SPECIFIC new report.
+  //
+  // Precedence: empty-state ALWAYS beats list-present. If both are
+  // in the dump (theoretically impossible per Compose but pinnable),
+  // the queue is considered empty and the assertion returns false.
+  driver.androidAdminShowsNewReportInQueue = async (_reviewer) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const listRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?reportReview_list"[^>]*\/?>/;
+    if (!listRx.test(dump)) return false;
+
+    const emptyRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?reportReview_emptyState"[^>]*\/?>/;
+    return !emptyRx.test(dump);
+  };
+
+  // Wake 92 — `<Name>'s Android Admin UI shows a table of recent
+  // <X>` (j12:24). Generic admin-table presence assertion. The noun
+  // arg can be 1-3 words per the matcher's `(\w+(?:\s+\w+){0,2})`
+  // capture (e.g. "reports", "user reports", "active user reports").
+  //
+  // Foundation strategy: a TABLE_TAGS map from canonical noun to
+  // Compose testTag. Currently only one entry exists:
+  //   - "reports" → reportReview_list (the admin queue list)
+  //
+  // Unmapped nouns return false — same FAIL-loud contract as
+  // INPUT_TAGS in androidDisablesInput (PR #737). Future Compose
+  // work would add testTags for transactions/audits/users/etc.
+  //
+  // Returns boolean. The runner contract also accepts an array of
+  // entries for richer assertion chains, but the foundation just
+  // asserts visibility — a future PR can extract entries when
+  // needed (e.g. for "each entry shows <fields>" follow-up steps).
+  // TABLE_TAGS values are expected to be alphanumeric + underscore
+  // only (Compose testTag convention). The defensive escape on `tag`
+  // before regex interpolation defends against future entries that
+  // might contain regex metacharacters (e.g. a hypothetical
+  // "user-reports" with a hyphen, or worse, "report_list+" with a
+  // `+`). Without the escape, the next entry could be a latent
+  // regex-injection point.
+  const TABLE_TAGS = { reports: 'reportReview_list' };
+  driver.androidAdminShowsTableOf = async (_viewer, noun) => {
+    if (!noun || !noun.trim()) return false;
+    const tag = TABLE_TAGS[noun.trim().toLowerCase()];
+    if (!tag) return false;
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+    const escTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const tagRx = new RegExp(`<node[^>]*resource-id="(?:[^"]*:id\\/)?${escTag}"[^>]*\\/?>`);
+    return tagRx.test(dump);
+  };
+
+  // Two matchers (Wake 32-ish) delegate to this method:
+  //   `<P> on Android searches "<X>" in <screen>` → screen-scoped
+  //   `<P> on Android types "<X>" into the search field` → active-screen (null)
+  //
+  // First action method in the cluster — instead of asserting state,
+  // it performs a TAP + INPUT TEXT sequence. The runner doesn't
+  // inspect the return value (always wraps in ok: true), but the
+  // driver returns boolean for direct testability and for future
+  // runner refactors that might surface failures.
+  //
+  // Foundation strategy: SEARCH_FIELD_TAGS map from canonical screen
+  // name to Compose testTag. Currently one entry. Null screen falls
+  // back to the same tag (active-screen typically means "the
+  // currently visible search surface", which today is the new-
+  // message composer).
+  //
+  // Text encoding: adb's `shell input text` splits on spaces by
+  // default (each arg becomes a separate command). The standard
+  // workaround is to encode spaces as `%s`. Non-space chars pass
+  // through literally — no shell interpretation because adb()
+  // single-quotes every arg.
+  const SEARCH_FIELD_TAGS = { messages: 'newMessage_searchField' };
+  const DEFAULT_SEARCH_FIELD_TAG = 'newMessage_searchField';
+  driver.androidSearchIn = async (screen, text) => {
+    // `typeof text !== 'string'` rejects null and undefined too
+    // (typeof null === 'object'; typeof undefined === 'undefined').
+    if (typeof text !== 'string' || !text.trim()) return false;
+    // `!screen` matches null, undefined, and the empty string — all
+    // route to the default field. Empty-string screen is unreachable
+    // from valid Gherkin (matcher requires `\w+`), but the broad
+    // check is defensive.
+    const tag = !screen
+      ? DEFAULT_SEARCH_FIELD_TAG
+      : SEARCH_FIELD_TAGS[String(screen).trim().toLowerCase()];
+    if (!tag) return false;
+    const tapped = await driver.androidTapByTag(tag);
+    if (!tapped) return false;
+    try {
+      // Round 1 C-1: text is the first USER-CONTROLLED free-form
+      // string reaching adb() in the cluster. Prior methods passed
+      // only known-safe values (numeric coords, alphanumeric tags).
+      // adb() wraps each arg in single quotes; a single quote in
+      // `text` (e.g. "O'Brien", "can't") would produce unbalanced
+      // quotes and shell misparse.
+      //
+      // POSIX escape: replace ' with '\'' (close quote + escaped
+      // literal quote + reopen quote). Inside the surrounding
+      // single quotes that adb() adds, this round-trips correctly —
+      // the device receives the literal text.
+      //
+      // KNOWN LIMITATION (Round 1 I-1): the literal sequence `%s` in
+      // `text` is indistinguishable from an encoded space on the
+      // device side — adb's `input text` decodes `%s` as a literal
+      // space and has no `%%`-style escape. Searching for a string
+      // containing `%s` will yield spaces at those positions. Not
+      // fixable without a different keyboard-driver primitive
+      // (e.g. uiautomator setText via UI Automator API) — separate PR.
+      const quoteEscaped = text.replace(/'/g, "'\\''");
+      const spaceEncoded = quoteEscaped.replace(/ /g, '%s');
+      adb(['shell', 'input', 'text', spaceEncoded]);
+      return true;
+    } catch (e) {
+      console.error(
+        `[android-driver] androidSearchIn(${screen}, ${text}) input failed: ${e.message}`,
+      );
+      return false;
+    }
+  };
+
+  // Wake 76 — `the test runner scans all rendered strings on
+  // <Name>'s Android UI across N screens` (j13:60). Meta state-seed
+  // method: collects every `text=` and `content-desc=` value from
+  // the current uiautomator dump into an array, stored by the
+  // runner on `ctx.scannedStrings` for follow-up assertion steps
+  // (e.g. "no string has the en/strings.xml fallback when the
+  // locale is X").
+  //
+  // Foundation policy: only scans the CURRENT screen. The `screens`
+  // count is accepted-and-ignored — a future PR can add multi-
+  // screen navigation (tap each main tab, dump, collect, repeat).
+  // Even single-screen collection is useful for follow-up locale-
+  // fallback assertions against the visible UI.
+  //
+  // Returns an array of unique non-empty trimmed string values.
+  // Returns empty array on dump failure rather than null/undefined
+  // — the runner stores the result on ctx and downstream steps
+  // iterate it. A null/undefined return would force defensive
+  // checks at every callsite.
+  driver.androidScanAllRenderedStrings = async (_name, _screens) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return [];
+    const collected = new Set();
+    // Round 1 I-1 fix: the `(?<![\w-])` negative lookbehind blocks
+    // compound attribute names ending in `text` (e.g. `hint-text=`,
+    // `error-text=`, `sub-text=`). Without the guard, framework-
+    // internal placeholder/error labels would pollute the scanned-
+    // strings array and break downstream locale-fallback assertions.
+    // Mirrors the boundary used in androidShowsBanner (line 308).
+
+    const attrRx = /(?<![\w-])(?:text|content-desc)="([^"]*)"/g;
+    for (const m of dump.matchAll(attrRx)) {
+      const value = m[1].trim();
+      if (value) collected.add(value);
+    }
+    return [...collected];
+  };
+
+  // Composite matcher Wake 86-ish — "<P1> on <plat1> and <P2> on
+  // <plat2> both join the event room". Each platform's driver
+  // receives just the persona name and joins whatever room is
+  // currently visible (the journey orchestrator ensures only the
+  // event room is in the list at this point).
+  //
+  // Foundation strategy: tap the FIRST `roomList_roomCard_*` node
+  // found in the current uiautomator dump. This is the cluster's
+  // first method using a PARAMETERISED testTag prefix-match
+  // (vs. exact-match for INPUT_TAGS / TABLE_TAGS lookups). The
+  // `[^"]*` wildcard suffix matches any room-id (Firestore-style
+  // alphanumeric+hyphens) attached by HomeScreen.kt:155.
+  //
+  // If no room card is visible (empty rooms tab, or actor on a
+  // different tab), returns false — the journey author gets a
+  // clear FAIL.
+  driver.androidJoinEventRoom = async (_name) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+    // Round 1 I-1 refactor: use the TWO-STEP extraction pattern
+    // established by androidShowsMicIconAs (line 502),
+    // androidShowsBalanceViaListener (line 559), and
+    // androidReplacesFollowButton (line 596). This is
+    // ORDER-INDEPENDENT (handles bounds before or after resource-id
+    // in the same tag) and structurally cannot match a child
+    // node's bounds when the parent lacks them — `[^>]*` stays
+    // within the opening tag, then bounds is scanned from the
+    // captured tag string only. Sets the reference template for
+    // subsequent parameterised-testTag methods in this cluster.
+    //
+    // Diverges from androidTapByTag (line 218) which still uses
+    // the older `[^<]*?` pattern. That method works correctly
+    // because uiautomator emits bounds AFTER resource-id (verified
+    // standard order), but the two-step is the stricter
+    // foundation for the rest of the cluster.
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?roomList_roomCard_[^"]*"[^>]*\/?>/;
+    const tagMatch = dump.match(tagRx);
+    if (!tagMatch) return false;
+    const boundsMatch = tagMatch[0].match(/bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/);
+    if (!boundsMatch) return false;
+    const cx = Math.round((Number(boundsMatch[1]) + Number(boundsMatch[3])) / 2);
+    const cy = Math.round((Number(boundsMatch[2]) + Number(boundsMatch[4])) / 2);
+    return await driver.androidTap(cx, cy);
+  };
+
+  // Wake 99 — `<Name>'s Android UI navigates to "<Path>"` (j03+).
+  // Generic path-based navigation assertion. Path is a web-style
+  // URL like `/`, `/profile/42`, `/messages/abc`.
+  //
+  // Foundation strategy: PATH_TAGS map with prefix-resolver
+  //   1. Exact match (handles `/` — must not greedy-match other paths)
+  //   2. Prefix match: `/profile/42` → `/profile` mapping
+  //
+  // Currently 5 mappings, all grounded in existing Compose testTags:
+  //   - "/"         → main_roomsTab            (root → rooms landing)
+  //   - "/profile"  → profile_displayName       (any profile screen)
+  //   - "/messages" → main_messagesTab          (messages tab)
+  //   - "/wallet"   → wallet_balance            (wallet screen)
+  //   - "/settings" → securitySettingsScreen    (settings landing)
+  //
+  // Unmapped paths return false — FAIL-loud contract (same as
+  // INPUT_TAGS / TABLE_TAGS scaffolds).
+  //
+  // Foundation contract: PRESENCE check only. Tab paths assert the
+  // tab BAR is visible (true on every main screen), so they're
+  // looser than "user is on THIS tab specifically". A future PR
+  // can tighten with `selected="true"` for tab paths.
+  const PATH_TAGS = {
+    '/': 'main_roomsTab',
+    '/profile': 'profile_displayName',
+    '/messages': 'main_messagesTab',
+    '/wallet': 'wallet_balance',
+    '/settings': 'securitySettingsScreen',
+  };
+  function resolvePathTag(path) {
+    if (PATH_TAGS[path]) return PATH_TAGS[path];
+    // Prefix match: longest-matching prefix wins. Exclude '/' from
+    // prefix iteration (it's exact-only — otherwise every path
+    // would prefix-match it).
+    let best = null;
+    for (const prefix of Object.keys(PATH_TAGS)) {
+      if (prefix === '/') continue;
+      if (path === prefix || path.startsWith(prefix + '/')) {
+        if (!best || prefix.length > best.length) best = prefix;
+      }
+    }
+    return best ? PATH_TAGS[best] : null;
+  }
+  driver.androidNavigatesToPath = async (_name, path) => {
+    if (typeof path !== 'string' || !path.trim()) return false;
+    const tag = resolvePathTag(path.trim());
+    if (!tag) return false;
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+    const escTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const tagRx = new RegExp(`<node[^>]*resource-id="(?:[^"]*:id\\/)?${escTag}"[^>]*\\/?>`);
+    return tagRx.test(dump);
+  };
+
+  // Wake 100 — `<Name>'s Android UI shows the new "<X>" gift entry`
+  // (j05 — gift-log entry on recipient view). Driver receives
+  // `(name, giftId)` where giftId is the friendly name ("crown",
+  // "rose", etc.) per the j05 corpus.
+  //
+  // Foundation strategy: two-step COMPOSITION (mirrors
+  // androidAdminShowsNewReportInQueue from PR #739):
+  //   1. giftWall_grid testTag must be PRESENT (user is on the
+  //      gift-wall surface).
+  //   2. giftId text appears anywhere in the dump with word-boundary
+  //      protection — same regex shape as androidShowsBanner.
+  //
+  // The "new" semantic is journey-orchestrated — the test runs
+  // RIGHT AFTER a gift is sent, so the latest entry IS the new one.
+  // A future PR could layer per-row inspection (e.g.
+  // `giftWall_entry_${giftId}` parameterised testTag) to verify
+  // the specific entry rather than any text occurrence.
+  driver.androidShowsNewGiftEntry = async (_name, giftId) => {
+    if (typeof giftId !== 'string' || !giftId.trim()) return false;
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+    // Step 1: gift wall must be visible
+
+    const wallRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?giftWall_grid"[^>]*\/?>/;
+    if (!wallRx.test(dump)) return false;
+    // Step 2: giftId text appears with word-boundary protection
+    // (same boundary shape as androidShowsBanner — blocks prefix
+    // collisions like "Crowning" / "primrose" matching "crown" /
+    // "rose"). Hint is regex-escaped for future gift IDs that
+    // might contain dots, plus signs, etc.
+    const escGift = giftId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Round 1 I-1 fix: SYMMETRIC inner boundaries. Original was
+    // `(?<![\w-])...(?!\w)` — left blocks word + hyphen, right only
+    // blocks word. Asymmetric: `text="crown-shaped"` false-matches
+    // `crown` because hyphen passes the right lookahead.
+    //
+    // Fixed to `(?![\w-])` on the right — symmetric with the left
+    // lookbehind. Now `crown-shaped` correctly does NOT match
+    // `crown`, while `Adam sent crown today` (space-padded) still
+    // does. Defends against compound gift labels like "rose-gold
+    // pendant" false-matching the "rose" hint.
+
+    const giftRx = new RegExp(
+      `(?<![\\w-])(?:text|content-desc)="[^"]*(?<![\\w-])${escGift}(?![\\w-])[^"]*"`,
+    );
+    return giftRx.test(dump);
+  };
+
+  // Wake 102 — `<Name>'s Android UI shows <Other> in seat N of the
+  // seat grid` (j09). Driver receives `(viewer, target, seatNum)`.
+  //
+  // Foundation strategy: two-step composition (mirrors PR #745's
+  // androidShowsNewGiftEntry):
+  //   1. room_seatGrid testTag PRESENT (user is on the room screen).
+  //   2. target's name appears in any text= or content-desc= with
+  //      SYMMETRIC word-boundary protection (`(?<![\w-])` +
+  //      `(?![\w-])` — same shape as PR #745 R1 fix).
+  //
+  // The seat-position semantic is journey-orchestrated until per-
+  // seat testTags exist (Compose currently only tags the container
+  // `room_seatGrid`, not individual seats). A future PR could
+  // layer this with e.g. `room_seat_${seatNum}_displayName` for
+  // stricter per-position verification.
+  driver.androidShowsInSeatGrid = async (_viewer, target, _seatNum) => {
+    if (typeof target !== 'string' || !target.trim()) return false;
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+    // Step 1: seat-grid must be visible
+
+    const gridRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?room_seatGrid"[^>]*\/?>/;
+    if (!gridRx.test(dump)) return false;
+    // Step 2: target name appears with symmetric word-boundary
+    const escTarget = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const targetRx = new RegExp(
+      `(?<![\\w-])(?:text|content-desc)="[^"]*(?<![\\w-])${escTarget}(?![\\w-])[^"]*"`,
+    );
+    return targetRx.test(dump);
+  };
+
+  // Wake 99 — `<Name>'s Android UI shows a "<X>" gift from <Other>`
+  // (j01). Driver receives `(recipient, giftId, sender)`.
+  //
+  // Foundation strategy: TRIPLE composition (extends the double
+  // composition from PR #745):
+  //   1. giftWall_grid testTag PRESENT (recipient is on gift-wall).
+  //   2. giftId text appears with symmetric word-boundary.
+  //   3. sender text appears with symmetric word-boundary.
+  //
+  // Both substring scans run over the whole dump independently.
+  // The journey orchestrator ensures only one gift entry is shown
+  // at the time of the assertion, so cross-entry "match in
+  // different entries" false positives aren't reachable. A future
+  // PR could layer per-entry verification once Compose ships per-
+  // entry testTags.
+  driver.androidShowsGiftFromSender = async (_recipient, giftId, sender) => {
+    if (typeof giftId !== 'string' || !giftId.trim()) return false;
+    if (typeof sender !== 'string' || !sender.trim()) return false;
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+    // Step 1: gift wall must be visible
+
+    const wallRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?giftWall_grid"[^>]*\/?>/;
+    if (!wallRx.test(dump)) return false;
+    // Step 2: giftId appears with symmetric word-boundary
+    const escGift = giftId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const giftRx = new RegExp(
+      `(?<![\\w-])(?:text|content-desc)="[^"]*(?<![\\w-])${escGift}(?![\\w-])[^"]*"`,
+    );
+    if (!giftRx.test(dump)) return false;
+    // Step 3: sender appears with symmetric word-boundary
+    const escSender = sender.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const senderRx = new RegExp(
+      `(?<![\\w-])(?:text|content-desc)="[^"]*(?<![\\w-])${escSender}(?![\\w-])[^"]*"`,
+    );
+    return senderRx.test(dump);
+  };
+
+  // Wake 105 — `<Name>'s Android UI shows the message in the
+  // conversation thread` (j11). Single-arg. The matcher is
+  // intentionally specific (NOT the Wake-100 generic in-thread
+  // variant with a noun capture): "the message" refers to a
+  // journey-orchestrated specific message that was just sent.
+  //
+  // Foundation strategy: assert the conversation thread is open
+  // by checking `privateChat_messageInput` testTag presence. The
+  // journey orchestrator ensures this matcher only fires AFTER a
+  // specific message was sent, so "the message" being visible is
+  // implied by the thread being open.
+  //
+  // A future PR could layer per-message verification once Compose
+  // ships per-message testTags (currently only the input field has
+  // a testTag). Same shape as PR #731's androidNavigatesToProfileScreen.
+  driver.androidShowsMessageInConversationThread = async (_name) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?privateChat_messageInput"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 102 — `<Name>'s Android UI shows a new conversation with
+  // <Other> highlighted as unread` (j07 — recipient's inbox shows
+  // new unread conversation from sender). Driver receives
+  // `(viewer, other)`.
+  //
+  // Foundation strategy: two-step composition (mirrors PR #745):
+  //   1. main_messagesTab testTag PRESENT (viewer is in messages
+  //      area — this assertion can't be made from anywhere else).
+  //   2. other's name appears in text/content-desc with symmetric
+  //      word-boundary protection.
+  //
+  // The "highlighted as unread" semantic is journey-orchestrated.
+  // No per-row testTag exists for unread state today; a future PR
+  // could layer this with e.g. `conversation_row_${id}_unread`.
+  driver.androidShowsNewUnreadConversation = async (_viewer, other) => {
+    if (typeof other !== 'string' || !other.trim()) return false;
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+    // Step 1: messages tab visible
+
+    const tabRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?main_messagesTab"[^>]*\/?>/;
+    if (!tabRx.test(dump)) return false;
+    // Step 2: other name appears with symmetric word-boundary
+    const escOther = other.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const otherRx = new RegExp(
+      `(?<![\\w-])(?:text|content-desc)="[^"]*(?<![\\w-])${escOther}(?![\\w-])[^"]*"`,
+    );
+    return otherRx.test(dump);
+  };
+
+  // Wake 98 — `<Name>'s Android Admin UI shows N row for "<X>" with
+  // status "<Y>"` (j01/j04 admin-queue row presence). Driver
+  // receives `(viewer, count, targetId, status)`.
+  //
+  // Foundation strategy: TRIPLE composition (mirrors PR #747's
+  // androidShowsGiftFromSender):
+  //   1. reportReview_list testTag PRESENT (admin queue visible)
+  //   2. targetId text appears with symmetric word-boundary
+  //   3. status text appears with symmetric word-boundary
+  //
+  // The COUNT (typically 1) is journey-orchestrated and ignored
+  // at foundation — no per-row testTag exists for counting matching
+  // rows. A future PR could layer this with `reportReview_row_${id}`
+  // parameterised testTags.
+  //
+  // Cross-row pass-through (same as PR #747): if multiple rows
+  // are visible with targetId in row-A and status in row-B, the
+  // assertion passes. Journey orchestrator's responsibility to
+  // ensure single-row context.
+  driver.androidAdminShowsRowForWithStatus = async (_viewer, _count, targetId, status) => {
+    if (typeof targetId !== 'string' || !targetId.trim()) return false;
+    if (typeof status !== 'string' || !status.trim()) return false;
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+    // Step 1: admin queue visible
+
+    const listRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?reportReview_list"[^>]*\/?>/;
+    if (!listRx.test(dump)) return false;
+    // Step 2: targetId appears with symmetric word-boundary
+    const escTarget = targetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const targetRx = new RegExp(
+      `(?<![\\w-])(?:text|content-desc)="[^"]*(?<![\\w-])${escTarget}(?![\\w-])[^"]*"`,
+    );
+    if (!targetRx.test(dump)) return false;
+    // Step 3: status appears with symmetric word-boundary
+    const escStatus = status.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const statusRx = new RegExp(
+      `(?<![\\w-])(?:text|content-desc)="[^"]*(?<![\\w-])${escStatus}(?![\\w-])[^"]*"`,
+    );
+    return statusRx.test(dump);
+  };
+
+  // Wake 104 — `<Name>'s Android Admin UI shows N rows in the <X>
+  // table` (j12 — generic admin table row-count assertion). Driver
+  // receives `(viewer, count, tableName)`.
+  //
+  // Foundation strategy: same TABLE_TAGS lookup as PR #740's
+  // androidAdminShowsTableOf. Same TABLE_TAGS constant is
+  // intentionally redeclared in this closure for symmetry and
+  // future independent evolution. Currently one entry:
+  //   - "reports" → reportReview_list
+  //
+  // The COUNT is journey-orchestrated and ignored at foundation —
+  // no per-row testTag exists for counting matching rows. A future
+  // PR could layer this with `reportReview_row_${id}` parameterised
+  // testTags + a counter scan.
+  //
+  // Unmapped tableNames return false (FAIL-loud) — same scaffold-
+  // then-expand discipline as INPUT_TAGS (PR #737), TABLE_TAGS
+  // (PR #740), SEARCH_FIELD_TAGS (PR #741), PATH_TAGS (PR #744).
+  const ROW_COUNT_TABLE_TAGS = { reports: 'reportReview_list' };
+  driver.androidAdminShowsRowCountInTable = async (_viewer, _count, tableName) => {
+    if (typeof tableName !== 'string' || !tableName.trim()) return false;
+    const tag = ROW_COUNT_TABLE_TAGS[tableName.trim().toLowerCase()];
+    if (!tag) return false;
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+    const escTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const tagRx = new RegExp(`<node[^>]*resource-id="(?:[^"]*:id\\/)?${escTag}"[^>]*\\/?>`);
+    return tagRx.test(dump);
+  };
+
+  // Wake 100 — `<Name>'s Android UI shows the <noun> in the thread
+  // [with <suffix>]` (j07, 2 corpus rows). noun is "message" or
+  // "reply"; optional trailing suffix like "with timestamp + sent
+  // indicator". Driver receives `(name, noun, suffix)`.
+  //
+  // Foundation strategy: presence-check the conversation thread
+  // is open (privateChat_messageInput testTag PRESENT). Same shape
+  // as PR #748's androidShowsMessageInConversationThread but with
+  // two additional accepted-and-ignored args (noun, suffix).
+  //
+  // The noun/suffix details are journey-orchestrated — the test
+  // runs RIGHT AFTER a specific message/reply is sent, so "the
+  // <noun>" being visible is implied by the thread being open. A
+  // future PR could layer per-message verification with parameterised
+  // testTags or by parsing message bodies in the dump.
+  driver.androidShowsInThread = async (_name, _noun, _suffix) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?privateChat_messageInput"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 101 — `<Name>'s Android UI shows <Other>'s seat with <X>
+  // indicator` (j09 mic-on / j10 mic-off). Generic per-seat
+  // indicator assertion. Driver receives `(viewer, target,
+  // indicator)`.
+  //
+  // Foundation strategy: TRIPLE composition (mirrors PR #747's
+  // androidShowsGiftFromSender):
+  //   1. room_seatGrid testTag PRESENT (viewer on room screen)
+  //   2. target's name appears with symmetric word-boundary
+  //   3. indicator text appears with symmetric word-boundary
+  //
+  // Per-seat indicator scoping is journey-orchestrated — no per-
+  // seat testTag exists yet. The journey ensures only the
+  // relevant seat is in view at assertion time. A future PR could
+  // layer per-seat per-indicator testTags (e.g.
+  // `room_seat_${n}_micOn`).
+  //
+  // Cross-seat pass-through (same as PR #747's cross-entry): two
+  // independent scans over the whole dump. Journey orchestrator's
+  // responsibility to ensure single-seat context.
+  driver.androidShowsSeatWithIndicator = async (_viewer, target, indicator) => {
+    if (typeof target !== 'string' || !target.trim()) return false;
+    if (typeof indicator !== 'string' || !indicator.trim()) return false;
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+    // Step 1: seat grid visible
+
+    const gridRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?room_seatGrid"[^>]*\/?>/;
+    if (!gridRx.test(dump)) return false;
+    // Step 2: target appears with symmetric word-boundary
+    const escTarget = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const targetRx = new RegExp(
+      `(?<![\\w-])(?:text|content-desc)="[^"]*(?<![\\w-])${escTarget}(?![\\w-])[^"]*"`,
+    );
+    if (!targetRx.test(dump)) return false;
+    // Step 3: indicator appears with symmetric word-boundary
+    const escIndicator = indicator.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const indicatorRx = new RegExp(
+      `(?<![\\w-])(?:text|content-desc)="[^"]*(?<![\\w-])${escIndicator}(?![\\w-])[^"]*"`,
+    );
+    return indicatorRx.test(dump);
+  };
+
+  // Wake 105 — `<Name>'s Android UI shows the second offensive
+  // message` (j11 — sequential corpus-specific assertion, journey-
+  // orchestrated after a first offensive message). Single-arg.
+  //
+  // Foundation strategy: presence-check the conversation thread is
+  // open (privateChat_messageInput testTag PRESENT). Same shape as
+  // PR #748's androidShowsMessageInConversationThread.
+  //
+  // The "second offensive message" semantic is journey-orchestrated
+  // — there's no per-message testTag and no "offensive" classifier
+  // visible in uiautomator dumps. The journey ensures the test only
+  // fires after the second offensive message lands. A future PR
+  // could layer per-message verification once messages have testTags.
+  driver.androidShowsSecondOffensiveMessage = async (_name) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?privateChat_messageInput"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 92 — `<Name>'s Android UI shows the list of contributors
+  // with amounts` (j15:35). Single-arg.
+  //
+  // Foundation strategy: presence-check the gift-wall surface
+  // (giftWall_grid testTag PRESENT). The "amounts" semantic is
+  // journey-orchestrated — without per-row testTags for contributor
+  // amounts, the foundation can't verify the per-row amount
+  // structure. The journey ensures this matcher only fires when
+  // the gift wall is showing contributor entries.
+  //
+  // A future PR could layer per-contributor verification via
+  // testTags like `giftWall_contributor_${id}_amount`.
+  driver.androidShowsContributorsList = async (_name) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?giftWall_grid"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 105 — `<Name>'s Android UI shows the system PM from
+  // Officia` (j11 — system-message visibility from the "Officia"
+  // official sender). Single-arg.
+  //
+  // Foundation strategy: presence-check the conversation thread is
+  // open (privateChat_messageInput testTag PRESENT). Same shape as
+  // PRs #748, #752, #754.
+  //
+  // The "system PM from Officia" semantic is journey-orchestrated
+  // — no per-sender testTag or official-badge classifier exists in
+  // uiautomator dumps today. The journey ensures the test only
+  // fires after the system PM is in the active thread. A future
+  // PR could layer per-message verification once Compose ships
+  // sender-tagged messages.
+  driver.androidShowsSystemPmFromOfficia = async (_name) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?privateChat_messageInput"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 92 — `<Name>'s Android UI shows the PM thread with
+  // document direction "<X>"` (j18:33). Driver receives
+  // `(name, direction)` where direction is "rtl" or "ltr".
+  //
+  // Foundation strategy: presence-check the conversation thread is
+  // open (privateChat_messageInput testTag PRESENT). The direction
+  // arg is accepted-and-ignored — RTL layout direction isn't
+  // surfaced via uiautomator's resource-id attributes on Compose;
+  // it's controlled by `Configuration.getLayoutDirection()` which
+  // requires a different inspection mechanism.
+  //
+  // A future PR could layer direction verification via `adb shell
+  // getprop persist.sys.locale` or parsing uiautomator's `class`
+  // attribute for layout-direction hints.
+  driver.androidShowsPmThreadDirection = async (_name, _direction) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?privateChat_messageInput"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Show welcome PM in language — j13 locale verification. The journey
+  // switches the viewer's locale (via the in-app language picker), then
+  // a fixture-driven welcome PM lands in the conversation. This matcher
+  // verifies the conversation thread is OPEN by checking for the
+  // privateChat_messageInput tag in the dump.
+  //
+  // Foundation policy: the locale `code` parameter is accepted-and-ignored.
+  // Verifying that displayed text is in a specific language would require
+  // comparing the message body against the localised welcome strings for
+  // each of the app's 20 supported locales, which needs access to the
+  // shared/src/commonMain/composeResources/values-{locale}/strings.xml
+  // files. The journey orchestrator ensures this matcher fires after the
+  // locale switch settled.
+  //
+  // A future PR could layer locale verification by reading the message
+  // text from a `welcomePm_message` testTag (currently not exposed) and
+  // hashing it against a known-locale registry, OR by parsing the
+  // `text="..."` attribute on the message node and checking script
+  // categories (Latin / Cyrillic / CJK).
+  driver.androidShowsWelcomePmInLanguage = async (_name, _code) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?privateChat_messageInput"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 87 — `<Name> on <Plat> selects N stars and submits feedback "<X>"`
+  // (j17:60). Composite rating-action: pick N stars + type feedback + submit.
+  //
+  // Foundation strategy: presence-check on the `feedbackScreen_*` testTag
+  // PREFIX. The current app has NO rating/feedback screen in
+  // shared/src/commonMain (no RatingScreen.kt / FeedbackScreen.kt files),
+  // so this method returns false in real journeys today. When the screen
+  // ships with `feedbackScreen_starRow` / `feedbackScreen_inputText` /
+  // `feedbackScreen_submitButton` testTags, this stays sound — the
+  // wildcard prefix match (`feedbackScreen_[^"]*`) will land.
+  //
+  // Per-element action body (tap N-th star + type feedback into input +
+  // tap submit) is deferred until per-element testTags exist. The (name,
+  // stars, feedback) args are accepted-and-ignored.
+  //
+  // Shell-escape note: when the real action ships, the `feedback` text
+  // MUST POSIX-escape `'` before any adb-shell interpolation (per the
+  // pattern fixed in PR #741 for free-form-text driver methods). The
+  // foundation does not call adb with free-form text, so the
+  // shell-injection surface is currently empty.
+  driver.androidSubmitStarFeedback = async (_name, _stars, _feedback) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?feedbackScreen_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 89 — `<Name> on <Plat> taps the <X> from the <Y>` (j16:24).
+  // Composite tap-from-surface action. Driver receives `(name, target,
+  // source)` — locate surface Y, scope to target X within it.
+  //
+  // Foundation strategy: SURFACE_TARGET_TAGS scaffold keyed by lowercase
+  // `${source}::${target}` → Compose testTag. ONE mapping is grounded
+  // in the journey corpus (j16:48):
+  //
+  //   'invite banner::event-room link' → 'inviteBanner_eventRoomLink'
+  //
+  // The `inviteBanner_*` testTag does NOT yet exist in
+  // shared/src/commonMain (no banner with this testTag in any current
+  // composable). So this method returns false in real journeys today.
+  // When the surface ships with that testTag, this stays sound — the
+  // exact-match lookup will land.
+  //
+  // FAIL-loud contract: unmapped source OR target returns false
+  // (consistent with INPUT_TAGS / TABLE_TAGS / SEARCH_FIELD_TAGS /
+  // PATH_TAGS / ROW_COUNT_TABLE_TAGS scaffolds). A journey author
+  // writing an unmapped surface gets a clear FAIL instead of a silent
+  // pass against an unrelated node.
+  //
+  // Per-element action body (tap the resolved testTag's bounds) is
+  // deferred until the testTag exists in the dump. The `_name` arg
+  // is accepted-and-ignored.
+  const SURFACE_TARGET_TAGS = {
+    'invite banner::event-room link': 'inviteBanner_eventRoomLink',
+  };
+  driver.androidTapFromSurface = async (_name, target, source) => {
+    if (!target || !target.trim()) return false;
+    if (!source || !source.trim()) return false;
+    const key = `${source.toLowerCase()}::${target.toLowerCase()}`;
+    const tag = SURFACE_TARGET_TAGS[key];
+    if (!tag) return false;
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+    // Defense-in-depth: regex-escape the tag value before interpolation,
+    // consistent with TABLE_TAGS (line 724), PATH_TAGS (line 932), and
+    // ROW_COUNT_TABLE_TAGS (line 1181). Current sole entry contains only
+    // `[A-Za-z_]`, but a future map value containing a regex metacharacter
+    // (e.g. `.` or `+`) would silently broaden the match without this guard.
+    const escTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const tagRx = new RegExp(`<node[^>]*resource-id="(?:[^"]*:id\\/)?${escTag}"[^>]*\\/?>`);
+    return tagRx.test(dump);
+  };
+
+  // Wake 89 — `<Name>'s <Plat> Admin UI shows <Other>'s appeal with the
+  // text` (j11:73). Admin moderation UI assertion. Driver verifies an
+  // appeal section is visible for <Other> with non-empty body text.
+  //
+  // Foundation strategy: presence-check on the `adminAppeal_*` testTag
+  // PREFIX. The current app has NO admin moderation surface in
+  // shared/src/commonMain — only the USER-side flow exists
+  // (`suspension_appealField` / `suspension_submitAppealButton` in
+  // SuspensionScreen.kt). The admin reviewer side is web-only today.
+  //
+  // Returns false in real journeys today. When/if an Android admin app
+  // ships with `adminAppeal_*` testTags, this stays sound — the wildcard
+  // prefix match will land.
+  //
+  // Both args (`_viewer`, `_target`) are accepted-and-ignored.
+  driver.androidAdminShowsAppealText = async (_viewer, _target) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?adminAppeal_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 105 — `<Name>'s <Plat> Admin UI shows the dashboard with
+  // counters: N reports, N verifications, N appeals` (j12). Admin
+  // landing page counters. Driver receives
+  // `(viewer, { reports, verifications, appeals })`.
+  //
+  // Foundation strategy: presence-check on `adminDashboard_*` testTag
+  // PREFIX. No admin moderation surface in shared/src/commonMain yet
+  // (web-only admin reviewer side) — see sibling matcher
+  // androidAdminShowsAppealText for context. Returns false in real
+  // journeys today; when adminDashboard_* testTags ship (e.g.
+  // adminDashboard_reportsCounter / verificationsCounter / appealsCounter),
+  // the wildcard prefix match will land.
+  //
+  // Both args (_viewer, _counters) accepted-and-ignored. The
+  // foundation does not validate that the displayed counter values
+  // match the expected object — that needs per-counter testTags + a
+  // text-extraction inspection mechanism.
+  driver.androidAdminShowsDashboardCounters = async (_viewer, _counters) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?adminDashboard_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 106 — `<Name>'s <Plat> Admin UI shows the "<X>" stat` (j12).
+  // Named-stat visibility on the admin dashboard. Driver receives
+  // `(viewer, statName)` where statName is a free-form display label.
+  //
+  // Foundation strategy: presence-check on the `adminStat_*` testTag
+  // PREFIX. No admin moderation surface in shared/src/commonMain yet
+  // (web-only admin) — see siblings androidAdminShowsAppealText (#762)
+  // and androidAdminShowsDashboardCounters (#763). Returns false in
+  // real journeys today; lands true when `adminStat_*` testTags ship.
+  //
+  // Both args (_viewer, _statName) accepted-and-ignored. The foundation
+  // does NOT verify that the specific named stat is displayed — it
+  // only verifies that ANY adminStat_* element is visible. Per-stat
+  // verification would need a stat-name → testTag map (similar to the
+  // SURFACE_TARGET_TAGS scaffold in #760).
+  driver.androidAdminShowsStat = async (_viewer, _statName) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?adminStat_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 103 — `<Name>'s <Plat> UI also shows <Other> in the participants
+  // list` (j09). Voice-room session — confirms <Other> is visible in
+  // <Name>'s participants list (multi-actor session sanity).
+  //
+  // Foundation strategy: presence-check on the `participantsList_*`
+  // testTag PREFIX. No `participantsList_*` testTag exists in
+  // shared/src/commonMain — voice-room participant rendering uses
+  // SeatItem.kt's `room_requestSeatButton` / `room_seatGrid` (without a
+  // participants-list testTag family). Returns false in real journeys
+  // today; lands true when participantsList_* testTags ship.
+  //
+  // Both args (_viewer, _other) accepted-and-ignored. Per-participant
+  // verification (asserting THIS specific user is in the list, not just
+  // "any participant tile is visible") needs a participant-id → testTag
+  // map (similar to the SURFACE_TARGET_TAGS scaffold in #760).
+  driver.androidAlsoShowsInParticipantsList = async (_viewer, _other) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?participantsList_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 86 — `<Name> on <Plat> approves <Other>'s seat request` (j17:51).
+  // Voice-room host action — host approves a pending seat request from
+  // <Other>. Driver receives `(host, requester)`.
+  //
+  // Foundation strategy: presence-check on the `seatRequest_*` testTag
+  // PREFIX. No `seatRequest_*` testTag exists in shared/src/commonMain
+  // yet — seat-request backend exists (SeatRequestRepository in
+  // core/room), but no UI testTag exposes the pending-requests panel
+  // or per-request Approve button. SeatItem.kt exposes only
+  // room_requestSeatButton (requester-side) and room_seatGrid (host
+  // view).
+  //
+  // Returns false in real journeys today; lands true when seatRequest_*
+  // testTags ship (e.g. seatRequest_pendingPanel /
+  // seatRequest_approveButton_<requesterId>).
+  //
+  // Both args (_host, _requester) accepted-and-ignored. Per-requester
+  // approval (tapping THIS specific approve button) needs a
+  // requester-id → testTag map.
+  driver.androidApproveSeatRequest = async (_host, _requester) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?seatRequest_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 88 — `<Name> on <Plat> opens <Other>'s profile and taps "<X>"`
+  // (j11:33). Composite open-profile + tap-action. Driver receives
+  // `(actor, target, button)`.
+  //
+  // Foundation strategy: presence-check on the `profile_*` testTag
+  // PREFIX. UNLIKE the admin/dashboard/seatRequest siblings, the
+  // `profile_*` testTag family DOES exist today —
+  // shared/src/commonMain/.../profile/ProfileScreen.kt exposes
+  // `profile_displayName` (lines 507 and 992). So this method WILL
+  // return true in real journeys whenever the profile screen is open.
+  //
+  // What's foundation about it: the per-button tap action (e.g. tap
+  // "Block" / "Report" / "Follow") is NOT yet implemented — buttons
+  // need their own per-action testTags (`profile_blockButton`,
+  // `profile_reportButton`, etc.). The foundation verifies the
+  // profile is OPEN; per-button targeting is deferred.
+  //
+  // All 3 args (_actor, _target, _button) accepted-and-ignored.
+  // Per-target verification (asserting <Other>'s profile specifically,
+  // not any profile) needs profile_displayName text-extraction.
+  // Per-button targeting needs a button-name → testTag map.
+  driver.androidOpenProfileAndTap = async (_actor, _target, _button) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?profile_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 88 — `<Name> on <Plat> opens <Other>'s profile from the <X>`
+  // (j17:71, j18:49). Composite navigation: from source surface (room,
+  // PM, inbox, ...) → <Other>'s profile. Driver receives
+  // `(actor, target, source)`.
+  //
+  // Foundation strategy: presence-check on the `profile_*` testTag
+  // PREFIX. Same target screen as androidOpenProfileAndTap (#767) —
+  // ProfileScreen.kt exposes `profile_displayName` (lines 507, 992).
+  // Returns true in real journeys whenever the profile screen is open.
+  //
+  // What's foundation about it: the source-surface navigation (room →
+  // tap-user-avatar / PM → tap-header-avatar / inbox → tap-row) is
+  // NOT yet driven by this method. The foundation only confirms the
+  // destination is the profile screen. A future PR with a
+  // source → entry-point-gesture map would enable proper driving of
+  // the navigation.
+  //
+  // All 3 args (_actor, _target, _source) accepted-and-ignored.
+  driver.androidOpenProfileFrom = async (_actor, _target, _source) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?profile_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 87 — `<Name> on <Plat> refreshes the language rail` (j17:78).
+  // Pull-to-refresh / refresh-button on the language-filter rail.
+  // Driver receives `(name)`.
+  //
+  // Foundation strategy: presence-check on the `languageRail_*` testTag
+  // PREFIX. No `languageRail_*` testTag exists in
+  // shared/src/commonMain yet — the language-filter rail UI is unbuilt.
+  // Returns false in real journeys today; lands true when the rail
+  // ships with `languageRail_*` testTags (e.g. languageRail_container,
+  // languageRail_refreshButton).
+  //
+  // Action body (perform the pull-to-refresh gesture or tap the
+  // refresh button) is deferred until per-element testTags exist.
+  // The `_name` arg is accepted-and-ignored.
+  driver.androidRefreshLanguageRail = async (_name) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?languageRail_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 87 — `<Name>'s <Plat> UI shows a chart of beans earned per
+  // week` (j17:74). Bare chart-presence assertion. Driver receives
+  // `(name)`.
+  //
+  // Foundation strategy: presence-check on the `beansChart_*` testTag
+  // PREFIX. No `beansChart_*` testTag exists in shared/src/commonMain
+  // yet — the beans-earnings chart UI is unbuilt. Returns false in
+  // real journeys today; lands true when the chart ships with
+  // `beansChart_*` testTags (e.g. beansChart_container,
+  // beansChart_weekBar).
+  //
+  // Bin-level value verification is out of scope (matcher contract is
+  // "bare chart-presence assertion"). `_name` accepted-and-ignored.
+  driver.androidShowsBeansPerWeekChart = async (_name) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?beansChart_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 98 — `<Name>'s <Plat> UI shows a +N in the "<X>" count`
+  // (j01/j02/j07). Generic delta-badge assertion. Driver receives
+  // `(name, delta, label)`.
+  //
+  // Foundation strategy: presence-check on the `countBadge_*` testTag
+  // PREFIX. No `countBadge_*` testTag exists in shared/src/commonMain
+  // yet — delta-badge UI is unbuilt. Returns false in real journeys
+  // today; lands true when ships with countBadge_followersDelta /
+  // countBadge_likesDelta testTags.
+  //
+  // Per-label verification (Followers vs Likes) needs a label →
+  // testTag map. Per-delta verification (matching the actual displayed
+  // +N) needs text-extraction. Both deferred. All 3 args
+  // (_name, _delta, _label) accepted-and-ignored.
+  driver.androidShowsCountBadge = async (_name, _delta, _label) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?countBadge_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 103 — `<Name>'s <Plat> UI shows the edited body "<X>" with an
+  // "<Y>" tag` (j07). Message-edit indicator on the recipient view.
+  // Driver receives `(name, body, tag)`.
+  //
+  // Foundation strategy: presence-check on the `editedBody_*` testTag
+  // PREFIX. No `editedBody_*` testTag exists in shared/src/commonMain
+  // yet — only the source-side `room_msg_editTarget_<id>` testTag
+  // exists (MessageBubble.kt:241), which marks the message being
+  // edited (NOT the post-edit "(edited)" badge on the recipient view
+  // — distinct concerns).
+  //
+  // Returns false in real journeys today; lands true when ships with
+  // editedBody_<msgId> / editedBody_badge testTags.
+  //
+  // Per-body and per-tag verification need text-extraction. Deferred.
+  // All 3 args (_name, _body, _tag) accepted-and-ignored.
+  driver.androidShowsEditedBodyWithTag = async (_name, _body, _tag) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?editedBody_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 100 — `<Name>'s <Plat> UI shows the in-app gift notification
+  // with sender "<X>" and gift "<Y>"` (j05). Toast/banner when a gift
+  // is received in real time. Driver receives
+  // `(recipient, sender, giftId)`.
+  //
+  // Foundation strategy: presence-check on the `giftNotification_*`
+  // testTag PREFIX. No `giftNotification_*` testTag exists in
+  // shared/src/commonMain yet — the real-time gift notification toast
+  // is unbuilt. Returns false in real journeys today; lands true when
+  // ships with giftNotification_toast / giftNotification_giftIcon.
+  //
+  // Per-sender and per-gift verification need text/image extraction.
+  // Deferred. All 3 args (_recipient, _sender, _giftId) accepted-and-
+  // ignored.
+  driver.androidShowsInAppGiftNotification = async (_recipient, _sender, _giftId) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?giftNotification_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 98 — `<Name>'s <Plat> UI shows <Other> in the results[ with
+  // displayName "<X>"]` (j01/j02). Discovery list result visibility.
+  // Optional displayName suffix. Driver receives
+  // `(viewer, target, displayName)` — displayName may be `null` (no
+  // `with displayName` suffix in step).
+  //
+  // Foundation strategy: presence-check on the `searchResults_*`
+  // testTag PREFIX. No `searchResults_*` testTag exists in
+  // shared/src/commonMain yet — NewMessageScreen.kt exposes only
+  // `newMessage_searchField` for the input box, not per-result tiles.
+  //
+  // Returns false in real journeys today; lands true when ships with
+  // searchResults_userTile / searchResults_container.
+  //
+  // Per-user verification needs user-id → testTag map. Per-displayName
+  // verification needs text-extraction. Both deferred. All 3 args
+  // (_viewer, _target, _displayName) accepted-and-ignored.
+  driver.androidShowsInResults = async (_viewer, _target, _displayName) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?searchResults_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 69/71 — `<Name>'s <Plat> UI shows the <noun> <kind>` (positive)
+  // and `... no longer shows ...` (negative; runner inverts assertion).
+  // Generic noun+kind matcher. Driver receives `(name, noun, kind)`.
+  // kind ∈ {button|screen|banner|dialog|panel|tab}.
+  //
+  // Foundation strategy: 7th *_TAGS scaffold (NOUN_KIND_TAGS) keyed by
+  // lowercase `${noun}::${kind}` composite → Compose testTag (exact
+  // match, NOT prefix). ONE mapping currently grounded (j11:86):
+  //
+  //   'appeal::button' → 'suspension_submitAppealButton'
+  //     (SuspensionScreen.kt:251 — user-side appeal flow)
+  //
+  // Unmapped composites return false — FAIL-loud (consistent with
+  // SURFACE_TARGET_TAGS / INPUT_TAGS scaffolds).
+  //
+  // The `_name` arg is accepted-and-ignored; `noun` and `kind` are
+  // REQUIRED (input rejection on empty/whitespace/null/undefined).
+  // Wake 89 — `<Name>'s <Plat> UI shows non-empty <Language> text for
+  // section N` (j13:36). Locale section assertion. Driver receives
+  // `(name, code, section)`.
+  //
+  // Foundation strategy: presence-check on the `localeText_*` testTag
+  // PREFIX. No `localeText_*` testTag exists in shared/src/commonMain
+  // yet — per-section locale-text testTags are unbuilt. Returns false
+  // in real journeys today; lands true when ships with
+  // localeText_section1 / localeText_section2 etc.
+  //
+  // Per-section verification needs a section-number → testTag map.
+  // Per-language verification needs text-extraction + script-category
+  // detection. Both deferred. All 3 args (_name, _code, _section)
+  // accepted-and-ignored.
+  driver.androidShowsNonEmptyLocaleText = async (_name, _code, _section) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?localeText_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 88 — `<Name>'s <Plat> UI shows the official badge[ <suffix>]`
+  // (j13/j18). Bare and suffixed forms; the optional trailing fragment
+  // is passed verbatim so the driver can dispatch to the right slot
+  // ("on the sender avatar", "with Arabic label", etc.).
+  //
+  // Foundation strategy: presence-check on the `officialBadge_*`
+  // testTag PREFIX. No `officialBadge_*` testTag exists in
+  // shared/src/commonMain yet — Official-user badge UI is unbuilt.
+  // Returns false in real journeys today; lands true when ships with
+  // officialBadge_icon / officialBadge_label.
+  //
+  // Per-suffix dispatch (avatar vs label, language variant) deferred.
+  // Both args (_name, _suffix) accepted-and-ignored.
+  driver.androidShowsOfficialBadge = async (_name, _suffix) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?officialBadge_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 99 — `<Name>'s <Plat> UI shows only minor-cohort users in the
+  // rankings` (j02). Cohort-filtered rankings list. Driver receives
+  // `(name)`.
+  //
+  // Foundation strategy: presence-check on the `rankings_*` testTag
+  // PREFIX. No `rankings_*` testTag exists in shared/src/commonMain
+  // yet — rankings UI is unbuilt. Returns false in real journeys today;
+  // lands true when ships with rankings_minorCohortList /
+  // rankings_userRow etc.
+  //
+  // Per-cohort verification (asserting ONLY minor-cohort users, not
+  // any users) needs row-level cohort attribute parsing. Deferred.
+  // The `_name` arg is accepted-and-ignored.
+  driver.androidShowsOnlyMinorCohortInRankings = async (_name) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?rankings_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 100 — `<Name>'s <Plat> UI shows (her|his|their) own rank in
+  // the top N` (j05). Leaderboard own-rank visibility. Driver receives
+  // `(name, topN)`.
+  //
+  // Foundation strategy: presence-check on the `ownRank_*` testTag
+  // PREFIX. No `ownRank_*` testTag exists in shared/src/commonMain
+  // yet — leaderboard own-rank highlight is unbuilt. Returns false in
+  // real journeys today; lands true when ships with
+  // ownRank_indicator / ownRank_userRow etc.
+  //
+  // Per-topN verification (asserting rank is within top N) needs
+  // text-extraction. Deferred. Both args (_name, _topN) accepted-
+  // and-ignored.
+  driver.androidShowsOwnRankInTop = async (_name, _topN) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?ownRank_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 103 — `<Name>'s <Plat> UI shows the room-closed summary
+  // panel` (j09). Post-room-close summary view. Driver receives
+  // `(name)`.
+  //
+  // Foundation strategy: presence-check on the `roomClosedSummary_*`
+  // testTag PREFIX. No `roomClosedSummary_*` testTag exists in
+  // shared/src/commonMain yet — post-close summary UI is unbuilt.
+  // Returns false in real journeys today; lands true when ships with
+  // roomClosedSummary_panel / roomClosedSummary_stats etc.
+  //
+  // The `_name` arg is accepted-and-ignored.
+  driver.androidShowsRoomClosedSummary = async (_name) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?roomClosedSummary_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 97 — `<Name>'s <Plat> UI shows the warning banner overlay on
+  // top of the room` (j10). Cohort-warning overlay assertion. Driver
+  // receives `(name)`.
+  //
+  // Foundation strategy: presence-check on the `roomWarningBanner_*`
+  // testTag PREFIX. No `roomWarningBanner_*` testTag exists in
+  // shared/src/commonMain yet — the in-room overlay variant is unbuilt
+  // (the full-screen `warning_*` family in WarningScreen.kt:82+ is a
+  // distinct concern — different journey trigger). Returns false in
+  // real journeys today; lands true when ships with
+  // roomWarningBanner_overlay / _title etc.
+  //
+  // The `_name` arg is accepted-and-ignored.
+  driver.androidShowsRoomWarningBanner = async (_name) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?roomWarningBanner_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 101 — `<Name>'s <Plat> UI shows a seat-request notification
+  // with "<X>" + approve/deny` (j09). Host receives notification when
+  // a participant requests a seat. Driver receives `(host, requester)`.
+  //
+  // Foundation strategy: presence-check on the
+  // `seatRequestNotification_*` testTag PREFIX. No
+  // `seatRequestNotification_*` testTag exists in shared/src/commonMain
+  // yet — host-side notification UI is unbuilt. Returns false in real
+  // journeys today; lands true when ships with
+  // seatRequestNotification_toast / _actionRow etc.
+  //
+  // Distinct-from `seatRequest_*` (#766 — the host approval button
+  // family). Both args (_host, _requester) accepted-and-ignored.
+  driver.androidShowsSeatRequestNotification = async (_host, _requester) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?seatRequestNotification_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 103 — `<Name>'s <Plat> UI shows a +N in the stalkers/profile-
+  // visits counter` (j07). Profile-visit count increment. Driver
+  // receives `(name, delta)`.
+  //
+  // Foundation strategy: presence-check on the `stalkersDelta_*`
+  // testTag PREFIX. No `stalkersDelta_*` testTag exists in
+  // shared/src/commonMain yet — profile-visits delta badge is unbuilt.
+  // Returns false in real journeys today; lands true when ships with
+  // stalkersDelta_badge / _counter etc.
+  //
+  // Per-delta verification (matching the actual +N) needs text-
+  // extraction. Deferred. Both args (_name, _delta) accepted-and-
+  // ignored.
+  driver.androidShowsStalkersDelta = async (_name, _delta) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?stalkersDelta_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 93 — `OR within Nms <Name>'s <Plat> UI shows a "<X>" toast
+  // and navigates back to "<Y>"` (j10:36). Alternate-outcome step.
+  // Driver receives `(name, toast, route, timeout)`.
+  //
+  // Foundation strategy: presence-check on the `toastWithRoute_*`
+  // testTag PREFIX. No `toastWithRoute_*` testTag exists in
+  // shared/src/commonMain yet — toast-with-navigation combination is
+  // unbuilt. Returns false in real journeys today; lands true when
+  // ships with toastWithRoute_text / toastWithRoute_destination etc.
+  //
+  // Per-toast / per-route / timeout verification deferred. All 4 args
+  // (_name, _toast, _route, _timeout) accepted-and-ignored.
+  driver.androidShowsToastAndNavigates = async (_name, _toast, _route, _timeout) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?toastWithRoute_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 104 — `<Name>'s <Plat> UI shows a "<X>" toast and navigates
+  // back to "<Y>"` (j10). Toast + nav (no timeout prefix; distinct
+  // from Wake 93's `OR within Nms` variant — both share the same
+  // toast+route surface). Driver receives `(name, toast, route)`.
+  //
+  // Foundation strategy: presence-check on the `toastWithRoute_*`
+  // testTag PREFIX — same family as #784's `androidShowsToastAndNavigates`
+  // (j10 toast+nav surface is shared between OR-variant and direct
+  // variant). Returns false in real journeys today.
+  //
+  // Per-toast / per-route verification deferred. All 3 args (_name,
+  // _toast, _route) accepted-and-ignored.
+  driver.androidShowsToastAndNavigatesBack = async (_name, _toast, _route) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?toastWithRoute_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 97 — `<Name>'s <Plat> UI shows <Other>'s user card` (j07).
+  // Inner step under `within Nms`. Bare user-card-visibility check.
+  // Driver receives `(viewer, target)`.
+  //
+  // Foundation strategy: presence-check on the `userCard_*` testTag
+  // PREFIX. No `userCard_*` testTag exists in shared/src/commonMain
+  // yet — user-card overlay is unbuilt. Returns false in real journeys
+  // today; lands true when ships with userCard_root / userCard_avatar
+  // etc.
+  //
+  // Per-user verification needs user-id → testTag map. Deferred. Both
+  // args (_viewer, _target) accepted-and-ignored.
+  driver.androidShowsUserCard = async (_viewer, _target) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?userCard_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  // Wake 97 — `<Name>'s <Plat> UI shows skeleton placeholders for user
+  // cards` (j14). Low-bandwidth loading-state assertion. Driver
+  // receives `(name)`.
+  //
+  // Foundation strategy: presence-check on the `userCardSkeleton_*`
+  // testTag PREFIX. No `userCardSkeleton_*` testTag exists in
+  // shared/src/commonMain yet — skeleton placeholder UI is unbuilt.
+  // Returns false in real journeys today; lands true when ships with
+  // userCardSkeleton_row / userCardSkeleton_shimmer etc.
+  //
+  // Distinct from sibling `userCard_*` — skeletons are the loading
+  // state BEFORE the user-card overlay renders. The `_name` arg is
+  // accepted-and-ignored.
+  driver.androidShowsUserCardSkeletons = async (_name) => {
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+
+    const tagRx = /<node[^>]*resource-id="(?:[^"]*:id\/)?userCardSkeleton_[^"]*"[^>]*\/?>/;
+    return tagRx.test(dump);
+  };
+
+  const NOUN_KIND_TAGS = {
+    'appeal::button': 'suspension_submitAppealButton',
+  };
+  driver.androidShowsNamedKind = async (_name, noun, kind) => {
+    if (!noun || !noun.trim()) return false;
+    if (!kind || !kind.trim()) return false;
+    const key = `${noun.toLowerCase()}::${kind.toLowerCase()}`;
+    const tag = NOUN_KIND_TAGS[key];
+    if (!tag) return false;
+    const dump = await driver.androidUiDump();
+    if (!dump) return false;
+    // Defense-in-depth: regex-escape the tag value before interpolation,
+    // consistent with TABLE_TAGS / PATH_TAGS / ROW_COUNT_TABLE_TAGS /
+    // SURFACE_TARGET_TAGS. The single mapped entry is `[A-Za-z_]`-only
+    // today, but future map values could contain regex metacharacters.
+    const escTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const tagRx = new RegExp(`<node[^>]*resource-id="(?:[^"]*:id\\/)?${escTag}"[^>]*\\/?>`);
+    return tagRx.test(dump);
+  };
+
+  // Open named screen — launches the local-build app via MainActivity.
+  // The app's AndroidManifest does NOT declare a `shytalk://` scheme
+  // (only HTTPS auth deep-links per app/src/main/AndroidManifest.xml).
+  // Without an in-app nav-via-intent mechanism, the best we can do is
+  // launch the main activity and trust the app's startup routing to
+  // land somewhere sensible (typically home or sign-in). Per-screen
+  // navigation needs to be UI-driven (tap by uiautomator-dump tag) and
+  // is the responsibility of higher-level matchers.
+  //
+  // Calling convention: single screen identifier (matchers pass one arg).
+  // Aligned with iosOpenScreen — previous (name, screen) signature did
+  // not match the matcher contract.
+  driver.androidOpenScreen = async (screen) => {
+    try {
+      adb([
+        'shell',
+        'am',
+        'start',
+        '-n',
+        'com.shyden.shytalk.local/com.shyden.shytalk.MainActivity',
+      ]);
+      // Brief settle so the activity has time to draw before subsequent
+      // dump/tap calls. The 1.5s value mirrors what the existing
+      // android-e2e tests use (see app/src/androidTest fixtures).
+      await new Promise((r) => setTimeout(r, 1500));
+      driver._requestedScreen = screen;
+      // If the screen identifier maps to a known MainScreen bottom-nav
+      // tab, tap it so subsequent taps on `<feature>_*` testTags in
+      // that tab actually find them. Without this, j09's
+      // "Theo taps main_createRoomFab" finds nothing because the
+      // dump is of whichever startup screen MainActivity landed on
+      // (typically `home`, not `rooms`).
+      //
+      // Tab list grounded in
+      //   shared/src/commonMain/.../feature/main/MainScreen.kt
+      // — main_<lowered>Tab is the existing testTag convention.
+      // Unknown screens fall through to a no-op tap (returns true so
+      // the launch alone counts as success — matches the prior
+      // "stash on driver" semantic).
+      const tabScreens = new Set(['rooms', 'home', 'messages', 'profile']);
+      if (screen && tabScreens.has(String(screen).toLowerCase())) {
+        const tag = `main_${String(screen).toLowerCase()}Tab`;
+        // Don't fail the whole call if the tab tap misses — the launch
+        // succeeded; the tab might already be active, or the app might
+        // be on the sign-in screen (no bottom nav visible). Surface
+        // miss as a log warning, not a return-false.
+        const tapped = await driver.androidTapByTag(tag);
+        if (!tapped) {
+          console.warn(
+            `[android-driver] androidOpenScreen(${screen}): launch ok, but tab "${tag}" not found in dump (likely not signed in or already on that tab)`,
+          );
+        }
+      }
+      return true;
+    } catch (e) {
+      console.error(`[android-driver] androidOpenScreen(${screen}) failed: ${e.message}`);
+      return false;
+    }
+  };
+
+  // Force-stop and cold-relaunch the app for `target` (default 'local'). Used
+  // by the moderation journeys (j10/j11): a seeded `hasActiveWarning` /
+  // `isSuspended` flag only surfaces its gate screen when the app's startup
+  // routing re-reads auth + moderation state on a FRESH launch — `am
+  // force-stop` then `am start` guarantees that cold path (a warm resume would
+  // keep the prior screen). The `name` arg (persona) is accepted for matcher
+  // symmetry + logging; the relaunch is session-agnostic (it restarts whatever
+  // session is signed in on the device). `target` selects the package
+  // (local/dev/prod) via PACKAGE_BY_TARGET so a dev-device run force-stops the
+  // .dev build (not .local). Returns true once the activity has been
+  // (re)started; the caller's `within <N>ms ...` assertion polls for the
+  // resulting screen.
+  driver.androidKillAndRelaunch = async (name, target = 'local') => {
+    try {
+      const pkg = PACKAGE_BY_TARGET[target] || PACKAGE_BY_TARGET.local;
+      adb(['shell', 'am', 'force-stop', pkg]);
+      adb(['shell', 'am', 'start', '-n', `${pkg}/com.shyden.shytalk.MainActivity`]);
+      // Cold start is slower than androidOpenScreen's warm launch (Firebase
+      // re-init + auth-state recheck), so settle a touch longer before the
+      // caller begins asserting. 2500ms mirrors the warning-screen cold-start
+      // budget observed on the OnePlus CPH2653.
+      await new Promise((r) => setTimeout(r, 2500));
+      return true;
+    } catch (e) {
+      console.error(`[android-driver] androidKillAndRelaunch(${name}) failed: ${e.message}`);
+      return false;
+    }
+  };
+
+  // androidTapQuotedTarget — wrapper around tag-based or owner-card tap.
+  // Runner step "<Name> on Android taps the "<X>"" passes (name, targetId,
+  // isRoomCard=false) — targetId is a testTag, delegate to androidTapByTag.
+  // Runner step "<Name> on Android taps the room "<X>" card" passes
+  // (name, targetId, isRoomCard=true) — targetId is the room owner name,
+  // delegate to androidTapRoomCard.
+  driver.androidTapQuotedTarget = async (name, targetId, isRoomCard) => {
+    try {
+      if (isRoomCard) {
+        return await driver.androidTapRoomCard(targetId);
+      }
+      return await driver.androidTapByTag(targetId);
+    } catch (e) {
+      console.error(
+        `[android-driver] androidTapQuotedTarget(${name}, ${targetId}, ${isRoomCard}) failed: ${e.message}`,
+      );
+      return false;
+    }
+  };
+
+  // androidTapRoomCard — taps a room card by its host's persona name.
+  // Looks for a UI element whose dump text or testTag includes the
+  // owner's name OR a `roomCard_<owner>` testTag. Owner=undefined means
+  // "tap the first room card visible" (Marcus same-cohort-gate scenario:
+  // `taps the room card` with no owner).
+  driver.androidTapRoomCard = async (owner) => {
+    try {
+      const dump = await driver.androidUiDump();
+      // Try testTag-based lookup first (most reliable): `roomCard_<owner>`
+      // OR `roomCard_<idx>` for owner-less variant.
+      if (owner) {
+        const tagged = await driver.androidTapByTag(`roomCard_${owner}`);
+        if (tagged) return true;
+      }
+      // Fallback: find any `roomCard_*` element with the owner's name
+      // appearing in the dump text inside its bounds, OR the first
+      // `roomCard_*` if owner is undefined.
+      const escOwner = (owner || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const tagPattern = owner
+        ? new RegExp(
+            `resource-id="(?:[^"]*:id/)?roomCard_\\w*"[^<]*?bounds="\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]"[^<]*?text="[^"]*${escOwner}[^"]*"`,
+          )
+        : /resource-id="(?:[^"]*:id\/)?roomCard_\w*"[^<]*?bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/;
+      const match = tagPattern.exec(dump);
+      if (!match) return false;
+      const [, x1, y1, x2, y2] = match.map((v, i) => (i === 0 ? v : Number(v)));
+      const cx = Math.round((x1 + x2) / 2);
+      const cy = Math.round((y1 + y2) / 2);
+      return await driver.androidTap(cx, cy);
+    } catch (e) {
+      console.error(`[android-driver] androidTapRoomCard(${owner}) failed: ${e.message}`);
+      return false;
+    }
+  };
+
+  // androidLongPressSeat — long-press on the seat occupied by `target`.
+  // Implementation: `adb shell input swipe X Y X Y 1000` — swipe with
+  // identical start+end coords over 1000ms registers as a long-press
+  // gesture (standard adb idiom for long-press). Locates the seat by
+  // looking for `seat_<targetName>` testTag OR any `seat_*` element with
+  // the target name in its text content.
+  driver.androidLongPressSeat = async (target) => {
+    try {
+      const dump = await driver.androidUiDump();
+      const escTarget = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // Try `seat_<target>` testTag first.
+      let re = new RegExp(
+        `resource-id="(?:[^"]*:id/)?seat_${escTarget}"[^<]*?bounds="\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]"`,
+      );
+      let match = re.exec(dump);
+      if (!match) {
+        // Fallback: any `seat_*` element with target name in its dump text.
+        re = new RegExp(
+          `resource-id="(?:[^"]*:id/)?seat_\\w*"[^<]*?bounds="\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]"[^<]*?text="[^"]*${escTarget}[^"]*"`,
+        );
+        match = re.exec(dump);
+      }
+      if (!match) return false;
+      const [, x1, y1, x2, y2] = match.map((v, i) => (i === 0 ? v : Number(v)));
+      const cx = Math.round((x1 + x2) / 2);
+      const cy = Math.round((y1 + y2) / 2);
+      // Long-press via swipe with same start+end coordinates over 1000ms.
+      adb(['shell', 'input', 'swipe', String(cx), String(cy), String(cx), String(cy), '1000']);
+      return true;
+    } catch (e) {
+      console.error(`[android-driver] androidLongPressSeat(${target}) failed: ${e.message}`);
+      return false;
+    }
+  };
+
+  // Network-drop simulation for j09's "Host disconnects unexpectedly —
+  // room auto-closes after grace period" scenario. Disables wifi + mobile
+  // data via `svc` (works under adb shell on unrooted devices; no root or
+  // WRITE_SECURE_SETTINGS grant needed because adb shell already has
+  // android.permission.WRITE_SECURE_SETTINGS via the shell UID).
+  //
+  // Runs through the disable → sleep → enable sequence regardless of any
+  // intermediate error so we don't leave the device offline if a step
+  // throws — equivalent to a try/finally pattern. The persona `name` is
+  // accepted for matcher-contract alignment (the runner step
+  // "<persona>'s Android network drops for N seconds" passes it) but
+  // unused — the driver acts on the singleton device under its serial.
+  // Wireless adb (TCP over WiFi) makes the WiFi/data disable approach
+  // self-destructive: dropping WiFi cuts the adb tunnel itself, so the
+  // device goes "offline" and every subsequent UI step on the same
+  // dispatch fails — surfaced 2026-05-30 against the operator's
+  // wireless-adb device `adb-3b402284-56nfBT._adb-tls-connect._tcp`.
+  //
+  // Wireless serial fingerprints:
+  //   - mDNS-discovered: contains `_adb-tls-connect` or starts with `adb-`
+  //   - manual TCP:      `IP:PORT` (digits, dots, colon)
+  // USB serials are hex/alphanumeric without `:` or the mDNS suffix.
+  function isWirelessAdb(s) {
+    if (!s) return false;
+    if (s.includes('_adb-tls-connect')) return true;
+    if (/^adb-/.test(s)) return true;
+    if (/^\d{1,3}(?:\.\d{1,3}){3}:\d+$/.test(s)) return true;
+    return false;
+  }
+  driver.androidNetworkDropFor = async (name, seconds) => {
+    // Refuse to disable WiFi over a wireless-adb connection — it would
+    // sever the adb tunnel mid-scenario and break every downstream step.
+    // The matcher surfaces this as a finding so the scenario stays
+    // visible (rather than silently passing) — the operator can re-run
+    // over USB adb if the network-drop scenario is in scope, or skip
+    // it via the @needs-usb-adb tag on the scenario.
+    if (isWirelessAdb(serial)) {
+      throw new Error(
+        `androidNetworkDropFor requires USB adb (current serial "${serial}" is wireless — disabling WiFi would kill the adb tunnel itself). Connect via USB and re-dispatch, or tag the scenario @needs-usb-adb to skip it on wireless runs.`,
+      );
+    }
+    const durationMs = Math.max(0, Number(seconds) * 1000);
+    let dropOk = true;
+    try {
+      adb(['shell', 'svc', 'wifi', 'disable']);
+      adb(['shell', 'svc', 'data', 'disable']);
+    } catch (e) {
+      dropOk = false;
+      console.error(
+        `[android-driver] androidNetworkDropFor(${name}, ${seconds}) disable phase failed: ${e.message}`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, durationMs));
+    let restoreOk = true;
+    try {
+      adb(['shell', 'svc', 'wifi', 'enable']);
+      adb(['shell', 'svc', 'data', 'enable']);
+    } catch (e) {
+      restoreOk = false;
+      console.error(
+        `[android-driver] androidNetworkDropFor(${name}, ${seconds}) re-enable failed: ${e.message}`,
+      );
+    }
+    return dropOk && restoreOk;
+  };
+  // Export the wireless-adb detector for unit tests + potential reuse
+  // by other "kills-the-tunnel" driver methods (e.g. a future airplane-
+  // mode helper).
+  driver._isWirelessAdb = () => isWirelessAdb(serial);
+
+  // Internal helper: poll androidUiDump until `tag` appears or the
+  // timeout elapses. Returns true on found, false on timeout. Used by
+  // androidPersonaSignIn for the post-tap settles where exact timing
+  // depends on Firebase network latency + Compose layout passes; a
+  // fixed setTimeout would either over-wait (slow tests) or under-wait
+  // (flake on slow runs).
+  async function waitForTag(tag, timeoutMs, pollMs = 200) {
+    const deadline = Date.now() + timeoutMs;
+    const escTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`resource-id="(?:[^"]*:id/)?${escTag}"`);
+    while (Date.now() < deadline) {
+      try {
+        const dump = await driver.androidUiDump();
+        if (re.test(dump)) return true;
+      } catch {
+        // Transient dump failures are tolerated within the wait window.
+      }
+      await new Promise((r) => setTimeout(r, pollMs));
+    }
+    return false;
+  }
+
+  // j09 + every-journey Background: "<persona> is signed in on Android
+  // physical at the <tab> tab". Drives the device APP through the
+  // persona picker, which is the canonical journey-test auth path
+  // (per feedback-test-personas-not-oauth: never drive Google/Apple
+  // OAuth in journey tests). Distinct from the runner's Firebase REST
+  // sign-in which only seeds ctx.sessions server-side — this also
+  // gets the device's APP onto the main screen so subsequent UI-action
+  // steps (taps, dumps) find the tags they expect.
+  //
+  // Personas need a P-NN id (P-02..P-19); the picker dialog rows are
+  // keyed by that id. Ephemeral personas (P-01 Adam, P-03 Mia) have
+  // no persisted Firebase account so they CAN'T sign in via the
+  // picker — they'd need the prod-flow signup which is a separate
+  // matcher's responsibility.
+  //
+  // Throws with an actionable error naming the step that failed
+  // (open-picker / pick-row / wait-for-main) so the runner surfaces
+  // a precise finding rather than the generic "ui dump didn't
+  // contain X" downstream.
+  // ── Auth-state helpers + real in-app sign-out (SHY-0096) ──────────────
+  //
+  // Tap an element by its VISIBLE TEXT, for screens whose buttons lack a
+  // testTag (e.g. the daily-reward popup's "Later"). Resolves the text
+  // node's bounds from a fresh UI dump and taps its centre. Returns false
+  // if the text is not present.
+  async function tapByVisibleText(text) {
+    let dump;
+    try {
+      dump = await driver.androidUiDump();
+    } catch {
+      return false;
+    }
+    const esc = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const m =
+      new RegExp(`text="${esc}"[^>]*?bounds="\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]"`).exec(dump) ||
+      new RegExp(`bounds="\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]"[^>]*?text="${esc}"`).exec(dump);
+    if (!m) return false;
+    const x = Math.floor((Number(m[1]) + Number(m[3])) / 2);
+    const y = Math.floor((Number(m[2]) + Number(m[4])) / 2);
+    // Return the ACTUAL tap result — androidTap returns false on an adb error
+    // (e.g. device offline mid-flow). An unconditional `true` would mask a
+    // failed tap as a successful dismissal (review Finding 5).
+    const tapped = await driver.androidTap(x, y);
+    return tapped;
+  }
+  driver._tapByVisibleText = tapByVisibleText;
+
+  // Dismiss the daily-reward popup ("Claim Today's Reward" / "Later") shown
+  // on the first login of the day. It has no testTag, so it is dismissed via
+  // the "Later" text. No-op (returns false) when not present.
+  async function dismissDailyRewardIfPresent() {
+    let dump;
+    try {
+      dump = await driver.androidUiDump();
+    } catch {
+      return false;
+    }
+    if (!/Claim Today|Daily Reward/i.test(dump)) return false;
+    const tapped = await tapByVisibleText('Later');
+    if (tapped) await new Promise((r) => setTimeout(r, 800));
+    return tapped;
+  }
+  driver._dismissDailyRewardIfPresent = dismissDailyRewardIfPresent;
+
+  // Advance past transient launch gates — the splash intro
+  // (`splash_continueButton`, shown on cold start), the daily-reward popup,
+  // and short-lived splash/transition frames — until a STABLE auth state is
+  // reached. Returns 'picker' | 'signed_in' | 'warning' | 'legal_gate' |
+  // 'unknown'. Bounded loop (`maxIterations`, default 12) so a stuck system
+  // dialog can't hang the driver. Shared by androidPersonaSignIn (Step 0b) +
+  // androidSignOut.
+  async function advancePastLaunchGates(maxIterations = 12) {
+    for (let i = 0; i < maxIterations; i++) {
+      let dump;
+      try {
+        dump = await driver.androidUiDump();
+      } catch {
+        dump = '';
+      }
+      const state = classifyAndroidAuthState(dump);
+      if (state === 'splash') {
+        await driver.androidTapByTag('splash_continueButton');
+        await new Promise((r) => setTimeout(r, 1500));
+        continue;
+      }
+      if (/Claim Today|Daily Reward/i.test(dump)) {
+        await tapByVisibleText('Later');
+        await new Promise((r) => setTimeout(r, 800));
+        continue;
+      }
+      // System permission dialogs re-prompt on launch and CANNOT be pre-granted
+      // via adb on this device (appops/pm grant are blocked — OEM security), so
+      // dismiss/grant them in-UI. NOTE: English-only system strings — an
+      // operator-side device reconfig (grant the overlay permission once, or
+      // enable adb security settings) is the locale-robust fix.
+      if (/Display over other apps/i.test(dump)) {
+        await tapByVisibleText('Not now');
+        await new Promise((r) => setTimeout(r, 800));
+        continue;
+      }
+      if (dump.includes('permission_allow_foreground_only_button')) {
+        await driver.androidTapByTag('permission_allow_foreground_only_button');
+        await new Promise((r) => setTimeout(r, 800));
+        continue;
+      }
+      if (state === 'unknown') {
+        // Splash/transition frame or a foreground system permission dialog —
+        // wait and re-dump rather than acting on an unrecognized screen.
+        await new Promise((r) => setTimeout(r, 800));
+        continue;
+      }
+      return state;
+    }
+    try {
+      return classifyAndroidAuthState(await driver.androidUiDump());
+    } catch {
+      return 'unknown';
+    }
+  }
+  driver._advancePastLaunchGates = advancePastLaunchGates;
+
+  // Real in-app sign-out — the ONLY reliable signed-out reset on a physical
+  // device (`pm clear` → SecurityException, `run-as rm` → Permission denied
+  // on the OnePlus CPH2653; SHY-0096). `am force-stop` does NOT clear the
+  // Firebase session, so persona-switching needs this genuine UI sign-out.
+  //
+  // Flow (testTags verified in source):
+  //   [warning gate] warning_acknowledgeButton — clear a moderation gate
+  //   [reward popup] "Later"                    — first-login-of-day popup
+  //   main_profileTab → main_settingsButton     — gear is Profile-tab-only
+  //                                               (MainScreen.kt:87-88)
+  //   → settings_signOutButton → settings_signOutConfirmButton
+  //   → assert persona_picker_open              — signed-out
+  //
+  // Idempotent: returns true immediately if already on the picker. Throws a
+  // specific, screen-naming error if any step cannot reach the picker (never
+  // a silent false that would leak a stale session into the next journey).
+  driver.androidSignOut = async () => {
+    const dumpState = async () => {
+      try {
+        return classifyAndroidAuthState(await driver.androidUiDump());
+      } catch {
+        return 'unknown';
+      }
+    };
+    let state = await advancePastLaunchGates();
+    if (state === 'picker') return true;
+    if (state === 'warning') {
+      await driver.androidTapByTag('warning_acknowledgeButton');
+      await new Promise((r) => setTimeout(r, 1500));
+      state = await dumpState();
+      if (state === 'picker') return true;
+      // AC (Error paths): a warning-acknowledge tap that does NOT advance must
+      // surface a clear "acknowledge did not clear the gate" error rather than
+      // falling through to a blind main-nav tap. A still-`warning` state means
+      // the ack failed (genuinely invalid/expired session, or the acknowledge
+      // endpoint failed) — the real-time observeUserFlags listener re-routes
+      // back to the warning screen while hasActiveWarning stays true, so the
+      // settings chain is unreachable. Fail loud, not silent.
+      if (state === 'warning') {
+        throw new Error(
+          'androidSignOut: tapped "warning_acknowledgeButton" but the warning gate is still showing — the acknowledge did not clear the gate (invalid/expired session, or the acknowledge endpoint failed). Cannot reach the settings sign-out chain.',
+        );
+      }
+    }
+    // A fresh-install legal/onboarding gate has no main nav — sign-out cannot
+    // clear it. Throw a specific, actionable error rather than a blind
+    // main_profileTab tap that would time out with a vaguer message.
+    if (state === 'legal_gate') {
+      throw new Error(
+        'androidSignOut: app is on a legal/onboarding gate ("legal_gate") — sign-out cannot clear a fresh-install gate. Re-install or provision the device, then retry.',
+      );
+    }
+    await dismissDailyRewardIfPresent();
+    await driver.androidTapByTag('main_profileTab');
+    await new Promise((r) => setTimeout(r, 800));
+    if (!(await waitForTag('main_settingsButton', 4000))) {
+      throw new Error(
+        `androidSignOut: "main_settingsButton" not visible after tapping main_profileTab — cannot reach settings (observed state: ${await dumpState()}). The app may be on a fresh-install gate (legal/onboarding) rather than main.`,
+      );
+    }
+    await driver.androidTapByTag('main_settingsButton');
+    if (!(await waitForTag('settings_signOutButton', 5000))) {
+      throw new Error(
+        'androidSignOut: "settings_signOutButton" never appeared after opening settings — the settings screen did not render or the testTag drifted.',
+      );
+    }
+    await driver.androidTapByTag('settings_signOutButton');
+    if (!(await waitForTag('settings_signOutConfirmButton', 4000))) {
+      throw new Error(
+        'androidSignOut: sign-out confirmation dialog ("settings_signOutConfirmButton") never appeared after tapping settings_signOutButton.',
+      );
+    }
+    await driver.androidTapByTag('settings_signOutConfirmButton');
+    if (!(await waitForTag('persona_picker_open', 8000))) {
+      throw new Error(
+        `androidSignOut: confirmed sign-out but "persona_picker_open" never returned within 8s (observed state: ${await dumpState()}) — sign-out may have failed or landed on a legal/onboarding gate.`,
+      );
+    }
+    return true;
+  };
+
+  driver.androidPersonaSignIn = async (personaId, tab, target = 'dev') => {
+    if (!/^P-\d{2}$/.test(personaId)) {
+      throw new Error(
+        `androidPersonaSignIn requires a P-NN persona id (got "${personaId}") — ephemeral personas P-01/P-03 sign up via the prod flow, not the picker`,
+      );
+    }
+    // Step 0: launch the ShyTalk app on the device. The first j09
+    // re-dispatch on 2026-05-30 surfaced "could not tap persona_picker_open"
+    // because the device was sitting on com.android.settings — the test
+    // never opened ShyTalk. Per-target package: local → .local,
+    // dev → .dev, prod → bare (no suffix). Mirrors the
+    // applicationIdSuffix config at app/build.gradle.kts lines 43/132.
+    const pkg = PACKAGE_BY_TARGET[target] || PACKAGE_BY_TARGET.dev;
+    // Force-stop FIRST so each call starts from a cold app PROCESS state
+    // (process isolation only). NOTE: force-stop does NOT clear the Firebase
+    // session — the app can relaunch already signed-in or on a moderation
+    // gate. The Step 0b classifier below (advancePastLaunchGates +
+    // androidSignOut when signed-in/warning) is what actually guarantees a
+    // picker-reachable sign-in-screen start. Errors are non-fatal — the
+    // package may not be running, that's fine.
+    try {
+      adb(['shell', 'am', 'force-stop', pkg]);
+    } catch {
+      // Ignored — force-stop on a non-running package is a no-op.
+    }
+    try {
+      // monkey -p <pkg> -c LAUNCHER 1 fires the registered launcher
+      // intent regardless of which activity is currently focused — works
+      // whether ShyTalk was closed, backgrounded, or another app is
+      // foregrounded. The "1" is the event count.
+      adb(['shell', 'monkey', '-p', pkg, '-c', 'android.intent.category.LAUNCHER', '1']);
+    } catch (e) {
+      throw new Error(
+        `androidPersonaSignIn: launch of "${pkg}" failed — is the ${target} build installed? adb error: ${e.message}`,
+        { cause: e },
+      );
+    }
+    // Settle for the launcher → ShyTalk transition. ~3s is enough for
+    // a warm start (app process already running). Cold starts may
+    // need longer; if the dump doesn't have persona_picker_open after
+    // 3s, the test below will catch it with the canonical error.
+    await new Promise((r) => setTimeout(r, 3000));
+    // Step 0b: advance past launch gates (splash intro / daily-reward popup /
+    // transition frames) then classify (SHY-0096). force-stop does NOT clear
+    // the Firebase session, so the app may relaunch signed-in (or on a
+    // moderation warning gate) instead of the picker; if so, perform a real
+    // in-app sign-out so the picker becomes reachable.
+    const launchState = await advancePastLaunchGates();
+    if (launchState === 'signed_in' || launchState === 'warning') {
+      await driver.androidSignOut();
+    }
+    // Step 1: tap `persona_picker_open` on the sign-in screen.
+    // Available on local + dev (PR #882); on prod the button is
+    // hidden so this will return false → actionable error.
+    const opened = await driver.androidTapByTag('persona_picker_open');
+    if (!opened) {
+      throw new Error(
+        `androidPersonaSignIn: could not tap "persona_picker_open" — ShyTalk ${target} launched but the picker testTag isn't visible. Possible causes: (a) the user is ALREADY signed in (sign out via Profile → Settings first), (b) the deployed dev APK predates PR #882 (deploy main to dev and re-install), or (c) the build flavor is "prod" where the picker is hidden by design.`,
+      );
+    }
+    // Step 2: wait for the dialog to render. Anchor on the persona-picker
+    // LazyColumn container (`persona_picker_list`) which is ALWAYS at the
+    // top of the dialog regardless of scroll position — using the
+    // requested row would fail for personas below the fold (the picker
+    // is capped at 400dp and lists 17 personas, so anything past ~P-09
+    // requires scrolling).
+    const containerTag = 'persona_picker_list';
+    const rowTag = `persona_row_${personaId}`;
+    const dialogReady = await waitForTag(containerTag, 5000);
+    if (!dialogReady) {
+      throw new Error(
+        `androidPersonaSignIn: picker dialog never showed "${containerTag}" within 5s — testTags may not be exposed via testTagsAsResourceId, or the dialog didn't render. Verify exposeTestTagsToPlatformDumps() is applied to the dialog content.`,
+      );
+    }
+    // Step 2b: scroll-to-find the requested row. Two cases to handle:
+    //   (a) Row testTag missing from the dump entirely — list hasn't
+    //       laid out the row yet, scroll to bring it into the layout
+    //       window.
+    //   (b) Row testTag PRESENT in the dump but its bounds are below
+    //       the picker_list's bottom clipping rect — uiautomator
+    //       reports laid-out bounds, NOT clipped bounds. A tap at
+    //       the row's center coordinates lands on the dialog backdrop
+    //       (outside the visible list), dismissing the dialog rather
+    //       than selecting the row. Surfaced 2026-05-30 against the
+    //       operator's OnePlus CPH2653 device where P-10's bounds
+    //       were [244,2225][1196,2393] but picker_list ended at y=2239
+    //       — only the top 14px of the row was clickable.
+    //
+    // Solution: loop until the row is BOTH in the dump AND fully
+    // inside the picker_list's visible rect. Swipe up if either fails.
+    function rowFullyVisible(dump) {
+      const escRow = rowTag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const escContainer = containerTag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const rowMatch = new RegExp(
+        `resource-id="(?:[^"]*:id/)?${escRow}"[^/]*?bounds="\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]"`,
+      ).exec(dump);
+      const listMatch = new RegExp(
+        `resource-id="(?:[^"]*:id/)?${escContainer}"[^/]*?bounds="\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]"`,
+      ).exec(dump);
+      if (!rowMatch || !listMatch) return false;
+      // y2 (row's bottom) must be <= list's y2 (list's bottom) AND
+      // y1 (row's top) must be >= list's y1 (list's top).
+      const rowY1 = Number(rowMatch[2]);
+      const rowY2 = Number(rowMatch[4]);
+      const listY1 = Number(listMatch[2]);
+      const listY2 = Number(listMatch[4]);
+      return rowY1 >= listY1 && rowY2 <= listY2;
+    }
+    let visible = false;
+    let swipes = 0;
+    const MAX_SWIPES = 15;
+    while (!visible && swipes < MAX_SWIPES) {
+      let dump = '';
+      try {
+        dump = await driver.androidUiDump();
+      } catch {
+        // Transient dump failures are tolerated within the wait window.
+      }
+      if (rowFullyVisible(dump)) {
+        visible = true;
+        break;
+      }
+      // Swipe up inside the picker to scroll the list DOWN. y range
+      // 1800→1000 stays inside the list bounds for typical phone
+      // viewports (list bottom ~2200+, top ~800+).
+      try {
+        adb(['shell', 'input', 'swipe', '720', '1800', '720', '1000', '500']);
+      } catch (e) {
+        console.error(
+          `[android-driver] persona-picker scroll swipe ${swipes} failed: ${e.message}`,
+        );
+      }
+      // Settle for the LazyColumn to lay out the new viewport.
+      await new Promise((r) => setTimeout(r, 400));
+      swipes++;
+    }
+    if (!visible) {
+      throw new Error(
+        `androidPersonaSignIn: "${rowTag}" never became fully visible inside the picker list after ${MAX_SWIPES} scroll attempts — persona may not be in the dev personas registry (provision-test-personas.js), or the list is shorter than expected.`,
+      );
+    }
+    // Step 3: tap the persona row. By this point the row's full
+    // height is inside the visible clipping rect, so androidTapByTag's
+    // bounds-center calculation lands inside the clickable area.
+    const picked = await driver.androidTapByTag(rowTag);
+    if (!picked) {
+      throw new Error(
+        `androidPersonaSignIn: tap on "${rowTag}" failed despite dialog showing the row fully visible — UI dump may be racing the tap`,
+      );
+    }
+    // Step 4: wait for sign-in completion. Anchor on `main_roomsTab`
+    // since that's the default landing tab for all signed-in users.
+    // Firebase REST sign-in via the picker can take 3-5s in the worst
+    // case (network roundtrip + Firestore profile fetch + Compose nav).
+    // Step 4: wait for Firebase sign-in to complete + advance past any
+    // post-sign-in launch gates (splash / system permission dialogs / the
+    // daily-reward popup) to the main screen (SHY-0096). The post-pick flow
+    // re-shows the same per-launch gates as Step 0b, so reuse the gate-advancer
+    // (with extra headroom for the Firebase sign-in roundtrip).
+    const postState = await advancePastLaunchGates(16);
+    if (postState !== 'signed_in') {
+      throw new Error(
+        `androidPersonaSignIn: after picking ${personaId}, expected the main screen but classified "${postState}" within the gate-advance budget — Firebase sign-in may have failed, or a warning/legal gate intercepted (check device logcat).`,
+      );
+    }
+    // Step 5: if the requested tab is not "rooms" (default landing),
+    // tap the requested tab. Mirrors the main-nav convention
+    // `main_<lowered>Tab` used by tapMainNavTab.
+    const loweredTab = String(tab).toLowerCase();
+    if (loweredTab !== 'rooms') {
+      const navOk = await driver.androidTapByTag(`main_${loweredTab}Tab`);
+      if (!navOk) {
+        throw new Error(
+          `androidPersonaSignIn: signed in OK but couldn't navigate to "main_${loweredTab}Tab" — tab name may not match the main nav convention`,
+        );
+      }
+      // Settle for the tab content to render before subsequent steps.
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    return true;
+  };
+
+  // j09 "Theo on Android confirms in the dialog" (line 107 close-room
+  // scenario) + future destructive-action confirmations. Tries a stack
+  // of known confirm-button testTags in priority order; first match
+  // wins.
+  //
+  // Priority order:
+  //   1. surface-specific tags (room_endRoomConfirmButton, etc.) —
+  //      tested first because they're unambiguous on the matching screen
+  //   2. generic dialog tags — fallback for AlertDialogs that follow
+  //      the Material convention but don't have a surface-specific tag
+  //
+  // Returns true on tap success. Returns false (with stderr warning)
+  // when NO candidate testTag is present in the dump — this surfaces
+  // a finding rather than silently succeeding on a missing dialog,
+  // matching the QA-mindset rule against plaster-fixes. Distinct from
+  // a tap-failure crash: the caller can decide whether to fail the
+  // step or move on.
+  //
+  // Known callers: j09 close-room (line 107). When that scenario fires
+  // against the current UI, the room_endRoomConfirmButton testTag is
+  // not yet on RoomSettingsSheet (the close action is currently
+  // immediate, no AlertDialog) — see follow-up note in PR body for
+  // the UX gap. This driver method is in place for when the dialog
+  // is added.
+  driver.androidConfirmDialog = async () => {
+    const CONFIRM_TAG_CANDIDATES = [
+      // Surface-specific (j09 close-room, j15 mc-end-stream, etc.)
+      'room_endRoomConfirmButton',
+      'settings_signOutConfirmButton',
+      'settings_clearCacheConfirmButton',
+      'settings_unblockConfirmButton',
+      'settings_deleteAccountConfirmButton',
+      'settings_deletePinConfirmButton',
+      // Generic AlertDialog fallback
+      'dialog_confirmButton',
+      'alertdialog_confirmButton',
+      'confirm_button',
+    ];
+    for (const candidate of CONFIRM_TAG_CANDIDATES) {
+      if (await driver.androidTapByTag(candidate)) {
+        return true;
+      }
+    }
+    console.error(
+      `[android-driver] androidConfirmDialog: no confirm-button testTag found in UI dump (tried ${CONFIRM_TAG_CANDIDATES.length} candidates). If the current scenario expects a confirmation dialog and the surface doesn't render one, this is a UX gap, not a driver bug.`,
+    );
+    return false;
+  };
+
+  driver.close = async () => {
+    /* adb sessions are stateless; nothing to release */
+  };
+
+  return driver;
+}
+
+module.exports = {
+  createAndroidDriver,
+  listMethods,
+  selectSerial,
+  classifyAndroidAuthState,
+  ANDROID_METHOD_NAMES,
+};

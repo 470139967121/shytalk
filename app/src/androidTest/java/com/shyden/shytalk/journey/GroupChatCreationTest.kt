@@ -1,0 +1,52 @@
+package com.shyden.shytalk.journey
+
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performScrollTo
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.shyden.shytalk.navigation.Screen
+import com.shyden.shytalk.util.ResetFakesRule
+import com.shyden.shytalk.util.ScreenshotRule
+import com.shyden.shytalk.util.launchNavGraph
+import com.shyden.shytalk.util.waitForTag
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+
+@RunWith(AndroidJUnit4::class)
+class GroupChatCreationTest {
+    @get:Rule(order = 0)
+    val resetFakes = ResetFakesRule()
+
+    @get:Rule(order = 1)
+    val composeTestRule = createComposeRule()
+
+    @get:Rule(order = 2)
+    val screenshotRule = ScreenshotRule(composeTestRule)
+
+    @Test
+    fun newMessage_showsSearchField() {
+        composeTestRule.launchNavGraph(startDestination = Screen.NewMessage.route)
+        composeTestRule.waitForTag("newMessage_searchField")
+        composeTestRule.onNodeWithTag("newMessage_searchField").assertIsDisplayed()
+    }
+
+    @Test
+    fun groupSetup_showsNameField() {
+        composeTestRule.launchNavGraph(
+            startDestination = Screen.GroupSetup.createRoute("test-user-2"),
+        )
+        composeTestRule.waitForTag("groupSetup_nameField")
+        composeTestRule.onNodeWithTag("groupSetup_nameField").assertIsDisplayed()
+    }
+
+    @Test
+    fun groupSetup_createButton_exists() {
+        composeTestRule.launchNavGraph(
+            startDestination = Screen.GroupSetup.createRoute("test-user-2"),
+        )
+        composeTestRule.waitForTag("groupSetup_createButton")
+        composeTestRule.onNodeWithTag("groupSetup_createButton").performScrollTo().assertIsDisplayed()
+    }
+}

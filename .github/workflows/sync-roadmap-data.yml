@@ -1,0 +1,171 @@
+name: Sync roadmap-data.json from SHY corpus
+
+# Authoritative regeneration of public/roadmap-data.json from .project/stories/SHY-NNNN-*.md.
+# Spec: .project/stories/SHY-0038-public-roadmap-gh-project-link.md (original infra)
+#       .project/stories/SHY-0063-fix-sync-roadmap-signed-commits.md (this signed-commit refactor)
+#
+# Trigger: every push to main that touches .project/stories/** (or this
+# workflow / the sync script themselves). Also workflow_dispatch for
+# on-demand re-sync + pre-merge testing.
+#
+# Loop guard: `if: github.actor != 'github-actions[bot]' && github.actor != 'shytalk-release-bot[bot]'`
+# prevents the workflow re-firing on either the default bot's commit OR the
+# Release App's own commit-back (which is the actor that the new
+# createCommitOnBranch path produces — see SHY-0063 § Why for the auth-chain
+# walk-through).
+#
+# Branch-protection note (SHY-0063): the commit-back uses GitHub's GraphQL
+# `createCommitOnBranch` mutation with a Release-App-minted token. The Release
+# GitHub App is registered in `bypass_actors` on main's branch-protection
+# ruleset (id 12613584), and createCommitOnBranch produces server-side App-
+# signed commits — satisfying both the `pull_request` requirement (App bypasses)
+# and the `required_signatures` rule. This replaces the prior `git push`
+# attempt that was rejected on PR #1044 with `GH013: Repository rule violations`.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".project/stories/**"
+      - "scripts/sync-shy-to-roadmap-data.mjs"
+      - ".github/workflows/sync-roadmap-data.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: sync-roadmap-data-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Regenerate roadmap-data.json
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Guard: skip when EITHER bot's own commit-back is the trigger.
+    # shytalk-release-bot[bot] is the actor recorded for App-authored
+    # createCommitOnBranch commits (SHY-0063).
+    if: github.actor != 'github-actions[bot]' && github.actor != 'shytalk-release-bot[bot]'
+    steps:
+      - name: Generate Release App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          # client-id accepts the numeric App ID stored in RELEASE_APP_ID
+          # (the action aliases client-id → appId internally). Same secret
+          # used by release.yml — single source of provenance.
+          client-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+          # App-token here too (not GITHUB_TOKEN): keeps the entire
+          # checkout-regen-commit chain attributed to the App identity in
+          # audit logs. Required by SHY-0063 § Happy path.
+          token: ${{ steps.app-token.outputs.token }}
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "20"
+
+      - name: Regenerate roadmap-data.json
+        run: node scripts/sync-shy-to-roadmap-data.mjs
+
+      - name: Commit signed roadmap update via GraphQL createCommitOnBranch
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          # I1 from reviewer (a0530c52e4032cb9a): file-absent guard before
+          # `git diff` to avoid a cryptic early-exit under set -euo pipefail.
+          # `git diff --quiet <path>` exits non-zero when the path is missing
+          # from the working tree (e.g. regen script silently failed without
+          # producing output). Without this guard the run aborts at the diff
+          # with no useful error. Surface the real problem instead.
+          if [ ! -f public/roadmap-data.json ]; then
+            echo "::error::public/roadmap-data.json was not produced by the sync script — aborting."
+            exit 1
+          fi
+          # Fast path: no diff means the regen output matches main exactly
+          # (SHY-0038's smart-timestamp logic reused `generatedAt` on no-ops).
+          # Skip the mutation entirely to keep audit-log noise + latency down.
+          if git diff --quiet public/roadmap-data.json; then
+            echo "[sync] no changes — public/roadmap-data.json is up to date"
+            {
+              echo "## Roadmap sync: no changes"
+              echo ""
+              echo "Regen produced byte-identical output to current \`main\`. Mutation skipped."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          PARENT_SHA=$(git rev-parse HEAD)
+          BRANCH="main"
+
+          # SHY-0063: createCommitOnBranch is the ONLY signed-commit path
+          # from CI without a configured GPG/SSH key. The Release App is in
+          # bypass_actors on ruleset 12613584; the mutation produces a
+          # commit signed as the App identity that satisfies main's
+          # required_signatures rule.
+          #
+          # Concurrency: expectedHeadOid: $PARENT_SHA is optimistic-
+          # concurrency protection. If another commit lands on main
+          # between `git rev-parse HEAD` above and this mutation, the
+          # mutation fails LOUD with a clear conflict and this workflow
+          # exits non-zero — the next push-to-main event re-triggers the
+          # workflow against the new HEAD, where the idempotent regen
+          # succeeds. No manual recovery needed.
+
+          # SHY-0064: build the entire GraphQL request body in ONE jq
+          # null-input invocation. The prior two-step pattern (mirrored from
+          # release.yml) used a second jq with `argjson`-style additions
+          # passing — that base64-encoded file content, at 177KB+ of
+          # unencoded JSON (~237KB base64), exceeded the Linux runner's
+          # effective ARG_MAX when passed as a single jq argv. The fix is
+          # structural: --rawfile reads the file inside this single jq, and
+          # the additions array is constructed inline within the jq filter
+          # via ($c1|@base64). The only large value is the final PAYLOAD
+          # bash variable, which is piped to `gh api graphql --input -` via
+          # stdin — kernel argv limits don't apply to bash variables, only
+          # to execve(argv).
+          PAYLOAD=$(jq -n \
+            --arg repo "${{ github.repository }}" \
+            --arg branch "${BRANCH}" \
+            --arg oid "${PARENT_SHA}" \
+            --arg msg "chore(roadmap): sync roadmap-data.json from SHY corpus" \
+            --rawfile c1 public/roadmap-data.json \
+            '{
+              query: "mutation($repo: String!, $branch: String!, $oid: GitObjectID!, $msg: String!, $additions: [FileAddition!]!) { createCommitOnBranch(input: { branch: { repositoryNameWithOwner: $repo, branchName: $branch }, expectedHeadOid: $oid, fileChanges: { additions: $additions }, message: { headline: $msg } }) { commit { oid url } } }",
+              variables: {repo: $repo, branch: $branch, oid: $oid, msg: $msg, additions: [{path: "public/roadmap-data.json", contents: ($c1|@base64)}]}
+            }')
+
+          # Submit the mutation. `gh api graphql --input -` reads the full
+          # request body from stdin (query + variables together) which
+          # handles complex variable types (FileAddition[]) cleanly + has no
+          # argv size limit (the entire point of SHY-0064's refactor).
+          RESPONSE=$(echo "$PAYLOAD" | gh api graphql --input -)
+          COMMIT_OID=$(echo "$RESPONSE" | jq -r '.data.createCommitOnBranch.commit.oid // empty')
+          if [ -z "$COMMIT_OID" ]; then
+            echo "::error::createCommitOnBranch mutation failed — response below."
+            echo "$RESPONSE" | jq .
+            exit 1
+          fi
+          echo "[sync] signed commit ${COMMIT_OID} on main"
+
+          # Step-summary audit record (parallels release.yml's SHY-0034 pattern).
+          # The directly-on-main commit has no PR to serve as audit trail; the
+          # run summary IS the audit record.
+          BYTES=$(wc -c < public/roadmap-data.json | tr -d ' ')
+          {
+            echo "## Roadmap sync: signed commit on main"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **Parent SHA** | \`${PARENT_SHA}\` |"
+            echo "| **New commit OID** | \`${COMMIT_OID}\` |"
+            echo "| **File** | \`public/roadmap-data.json\` |"
+            echo "| **Bytes** | ${BYTES} |"
+            echo "| **Signed by** | Release GitHub App (via \`createCommitOnBranch\`) |"
+          } >> "$GITHUB_STEP_SUMMARY"

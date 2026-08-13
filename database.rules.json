@@ -1,0 +1,46 @@
+{
+  "rules": {
+    "rooms": {
+      "$roomId": {
+        "presence": {
+          ".read": "auth != null",
+          "$userId": {
+            ".write": "auth != null && auth.uid == $userId",
+            ".validate": "newData.isBoolean()"
+          }
+        },
+        "events": {
+          "lastEvent": {
+            ".read": "auth != null",
+            ".write": false
+          }
+        }
+      }
+    },
+    "conversations": {
+      "$convId": {
+        "typing": {
+          ".read": "auth != null",
+          "$userId": {
+            ".write": "auth != null && auth.uid == $userId",
+            ".validate": "newData.isBoolean()"
+          }
+        },
+        "events": {
+          "lastEvent": {
+            ".read": "auth != null",
+            ".write": false
+          }
+        }
+      }
+    },
+    "ownerLeft": {
+      "$roomId": {
+        ".write": "auth != null && ((!newData.exists() && data.val() === auth.uid) || newData.val() === auth.uid)",
+        ".validate": "newData.isString() || !newData.exists()"
+      }
+    },
+    ".read": false,
+    ".write": false
+  }
+}

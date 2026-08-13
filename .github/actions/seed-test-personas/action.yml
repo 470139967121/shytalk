@@ -1,0 +1,75 @@
+name: 'Seed Test Personas'
+description: |
+  Provisions / refreshes the seeded test-persona cast (P-02 ... P-19) onto a
+  Firebase project's Auth + Firestore via firebase-admin. Idempotent: re-runs
+  update the existing seeded user docs in place (replace-only-seed-data
+  contract), never touch user accounts created manually by real people, and
+  every seed persona is marked with `seedSource: 'automation'` + a `[SEED]`
+  prefix on `displayName` so humans seeing the accounts in the app know at a
+  glance that they are not regular users.
+
+  Modeled on `.github/actions/deploy-firebase-rules/action.yml` — writes the
+  service-account JSON to a 077-umask temp file, exports
+  GOOGLE_APPLICATION_CREDENTIALS, and removes the file via `trap` so the
+  credential is wiped even if the provision fails. PERSONAS_PASSWORD comes
+  from a separate workflow secret (NOT in the service-account JSON).
+
+inputs:
+  service-account-json:
+    description: 'Firebase service account JSON (secret value) for the target project'
+    required: true
+  firebase-project:
+    description: 'Firebase project ID (must contain "dev" or "local" — the script asserts this)'
+    required: true
+  personas-password:
+    description: 'Shared password for the seeded persona accounts (≥20 chars). Generated once via openssl rand -base64 24, stored as a GitHub secret, never logged.'
+    required: true
+  database-url:
+    description: 'Firestore RTDB URL for the target project (e.g. https://shytalk-dev-default-rtdb.europe-west1.firebasedatabase.app). Required because the provision script transitively imports express-api/src/utils/firebase.js, which throws "FIREBASE_DATABASE_URL env var is required" at module-load time if unset. Region-specific; cannot be derived from project ID alone.'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Seed test personas
+      shell: bash
+      env:
+        SA_JSON: ${{ inputs.service-account-json }}
+        PROJECT: ${{ inputs.firebase-project }}
+        PERSONAS_PASSWORD: ${{ inputs.personas-password }}
+        DATABASE_URL: ${{ inputs.database-url }}
+      run: |
+        set -euo pipefail
+        umask 077
+        echo "$SA_JSON" > /tmp/firebase-sa-seed.json
+        # Trap so the credential file is wiped even if provision fails —
+        # without this, `set -e` would abort before the trailing `rm` and
+        # the JSON would leak to whatever runs next on the runner.
+        trap 'rm -f /tmp/firebase-sa-seed.json' EXIT
+        export GOOGLE_APPLICATION_CREDENTIALS=/tmp/firebase-sa-seed.json
+        export FIREBASE_PROJECT_ID="$PROJECT"
+        # FIREBASE_DATABASE_URL is region-specific (cannot be derived from
+        # project ID alone). The provision script transitively imports
+        # express-api/src/utils/firebase.js, which throws at module-load
+        # time if this var is unset. Caught in local dry-run after PRs
+        # #868 + #869 + #870 fixed the require/install chain.
+        export FIREBASE_DATABASE_URL="$DATABASE_URL"
+        # `cd express-api` so the script's `require('firebase-admin')` etc.
+        # resolves against `express-api/node_modules`. Running with a
+        # `express-api/scripts/...` path from repo root fails because the
+        # repo root has no `node_modules/firebase-admin`.
+        cd express-api
+        # `npm ci --omit=dev` installs production deps (firebase-admin,
+        # firebase-admin/firestore, etc.) into express-api/node_modules.
+        # The OUTER deploy-backend-dev workflow only installs deps on the
+        # REMOTE London VM (via ssh), NOT on the GitHub runner — so without
+        # this step the runner's express-api/node_modules is empty and
+        # `require('firebase-admin')` fails. Caught in runs 26637428443 +
+        # 26638445667 (both 'Cannot find module firebase-admin').
+        npm ci --omit=dev --no-audit --no-fund
+        # NB: NO `-r dotenv/config` preload — the script's docstring
+        # usage example uses dotenv because it assumes a `.env` file on the
+        # dev Express host. In CI the secrets are exported as env vars
+        # directly (PERSONAS_PASSWORD, GOOGLE_APPLICATION_CREDENTIALS,
+        # FIREBASE_PROJECT_ID all set above), so dotenv adds nothing.
+        node scripts/provision-test-personas.js

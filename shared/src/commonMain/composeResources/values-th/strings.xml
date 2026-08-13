@@ -1,0 +1,1743 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Common actions -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="all_caps">ทั้งหมด</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="back">กลับ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="cancel">ยกเลิก</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="change">เปลี่ยน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="close">ปิด</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="confirm">ยืนยัน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="continue_button">ดำเนินการต่อ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="create">สร้าง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="delete">ลบ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="done">เสร็จแล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="edit">แก้ไข</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_generic">มีบางอย่างผิดพลาด</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="got_it">เข้าใจแล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="learn_more">เรียนรู้เพิ่มเติม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="loading">กำลังโหลด...</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="maybe_later">อาจจะภายหลัง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="message_action">ข้อความ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="next">ต่อไป</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="ok">ตกลง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="retry">ลองอีกครั้ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="save">บันทึก</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="send">ส่ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="sending">กำลังส่ง...</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="transfer">โอนย้าย</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="unknown">ไม่ทราบ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="using">โดยใช้...</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="you">คุณ</string>
+
+    <!-- Message bubbles -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="edited">แก้ไขแล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="tap_to_join">แตะเพื่อเข้าร่วม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="message_recalled_by_you">คุณนึกถึงข้อความนี้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="message_recalled">ข้อความนี้ถูกเรียกคืน</string>
+    <string name="message_hidden_by_mod">ข้อความนี้ถูกซ่อนโดยผู้ดูแล</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="invite_to_mic">เชิญไมค์ครับ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="closed">ปิด</string>
+    <string name="edited_count">แก้ไขแล้ว (%1$d)</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="read">อ่าน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="sent">ส่งแล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="sticker">สติ๊กเกอร์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="image">ภาพ</string>
+
+    <!-- Context menu -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="react">ตอบสนอง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="reply">ตอบ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="copy">สำเนา</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="recall">จำ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="add_to_stickers">เพิ่มลงในสติ๊กเกอร์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="hide_message">ซ่อนข้อความ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="report_message">รายงานข้อความ</string>
+
+    <!-- Translation -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="translate">แปล</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="translated_from">แปลจาก %1$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="show_original">แสดงต้นฉบับ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="translation_limit_reached">ถึงขีดจำกัดรายวันแล้ว อัปเกรดเป็น SuperShy เพื่อการแปลไม่จำกัด</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="auto_translate">แปลอัตโนมัติ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="auto_translate_description">แปลข้อความขาเข้าเป็นภาษาของคุณโดยอัตโนมัติ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="translations_remaining">วันนี้เหลือการแปลอีก %1$d รายการ</string>
+
+    <!-- Settings -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="settings">การตั้งค่า</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="language">ภาษา</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="blocked_users">ผู้ใช้ที่ถูกบล็อก</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="account">บัญชี</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="privacy">ความเป็นส่วนตัว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="notifications">การแจ้งเตือน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="permissions">สิทธิ์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="about">เกี่ยวกับ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="sign_out">ออกจากระบบ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="sign_out_confirm">คุณแน่ใจหรือไม่ว่าต้องการออกจากระบบ?</string>
+
+    <!-- Home -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="create_room">สร้างห้อง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="create_room_prompt">ตั้งชื่อห้องของคุณ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="home">บ้าน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="in_room_count">%1$d อยู่ในห้อง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="join">เข้าร่วม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_active_rooms">ไม่มีห้องที่ใช้งานอยู่</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_rooms">ไม่มีห้องว่าง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="room_name">ชื่อห้อง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="room_name_label">ชื่อห้อง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="seats_count">%1$d/%2$d ที่นั่ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="speakers_count">%1$d/%2$d ลำโพง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="tap_plus_to_create">แตะ + เพื่อสร้าง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="visitors_count">ผู้เข้าชม %1$d คน</string>
+
+    <!-- Profile -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="connections">การเชื่อมต่อ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="display_name">ชื่อที่แสดง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="dob_privacy_note">ต้องระบุวันเกิด แต่คุณสามารถซ่อนอายุได้ในการตั้งค่าความเป็นส่วนตัว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="dob_required_subtitle">เราต้องการวันเกิดของคุณเพื่อดำเนินการต่อ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="follow">ติดตาม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="follow_back">ติดตามกลับ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="followers">ผู้ติดตาม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="followers_count">ผู้ติดตาม (%1$d)</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="following">กำลังติดตาม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="following_count">กำลังติดตาม (%1$d)</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="following_list_private">รายการต่อไปนี้ของผู้ใช้รายนี้เป็นส่วนตัว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="get_super_shy">รับซุปเปอร์อาย</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="gift_wall">กำแพงของขวัญ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="gift_value_coins">มูลค่า: %1$d เหรียญ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_followers_yet">ยังไม่มีผู้ติดตามเลย</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_profile_visitors">ยังไม่มีผู้เยี่ยมชมโปรไฟล์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="not_following_anyone">ยังไม่ได้ติดตามใครเลย</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="one_more_step">อีกก้าวหนึ่ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="profile">ประวัติโดยย่อ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="profile_setup_subtitle">เลือกชื่อที่แสดงและป้อนวันเกิดของคุณ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="received_times">ได้รับ %1$d ครั้ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="remove_follower">ลบผู้ติดตาม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="report">รายงาน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="select_date_of_birth">เลือกวันเดือนปีเกิด</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="select_nationality">เลือกสัญชาติ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="search_countries">ค้นหาประเทศ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="selected">เลือกแล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="set_up_your_profile">ตั้งค่าโปรไฟล์ของคุณ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="stalker_visit_info">ติดตามคุณ %1$s, %2$d ครั้งในช่วง 3 เดือนที่ผ่านมา</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="stalkers_count">สตอล์กเกอร์ (%1$d)</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="stalkers_super_shy_description">ดูว่าใครกำลังเยี่ยมชมโปรไฟล์ของคุณ! โปรไฟล์ stalkers เป็นคุณสมบัติพิเศษของ Super Shy</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="super_shy_benefit">ผลประโยชน์ขี้อายสุด ๆ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="top_senders">ผู้ส่งยอดนิยม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="block">ปิดกั้น</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="unblock">เลิกบล็อก</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="undo_remove">ยกเลิกการลบ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="unfollow">เลิกติดตาม</string>
+
+    <!-- Room -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="alias">นามแฝง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="approve">อนุมัติ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="audience">ผู้ชม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="back_to_home">กลับไปที่บ้าน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="backpack">กระเป๋าเป้สะพายหลัง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="backpack_empty">กระเป๋าเป้สะพายหลังของคุณว่างเปล่า\nหมุนวงล้อเพื่อรับของขวัญ!</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="ban">ห้าม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="block_user">บล็อกผู้ใช้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="block_user_confirm">คุณแน่ใจหรือไม่ว่าต้องการบล็อก %1$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="close_room">ปิดห้อง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="daily">รายวัน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="deny">ปฏิเสธ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="empty_seat">ที่นั่งว่าง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="filter_gift_animations_description">กรองภาพเคลื่อนไหวเพื่อหาของขวัญที่ถูกกว่า</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="gift">ของขวัญ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="gift_animations">ภาพเคลื่อนไหวของขวัญ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="host">เจ้าภาพ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="hosts">เจ้าภาพ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="invite_to_seat">เชิญนั่งครับ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="kick">เตะ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="kick_user">ผู้ใช้เตะ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="kick_user_confirm">คุณแน่ใจหรือว่าต้องการเตะ %1$s ออกจากห้อง พวกเขาจะไม่สามารถกลับเข้าร่วมได้อีก</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="leave_room">ออกจากห้อง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="leave_seat">ออกจากที่นั่ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="lock_seating">ล็อคที่นั่ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="lock_seating_description">มีเพียงเจ้าของเท่านั้นที่สามารถเชิญผู้ใช้ให้นั่งได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="buy_coins">ซื้อเหรียญ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="collect_all">รวบรวมทั้งหมด (%1$d)</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="increased_drop_rate">เพิ่มอัตราการดรอป</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="loading_prices">กำลังโหลดราคา...</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="lucky_spin">ลัคกี้สปิน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="lucky_spin_title">ลัคกี้ สปิน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="need_more_coins">ต้องการเหรียญเพิ่ม!</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_packages_available">ไม่มีแพ็คเกจให้เลือก</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_spins_yet">ยังไม่มีการหมุน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="prizes">รางวัล</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="skip_animation">ข้ามภาพเคลื่อนไหว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="spin">สปิน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="spin_count">%1$d หมุน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="spin_history">ประวัติการหมุน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="spin_results">ผลการหมุน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="message">ข้อความ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="move_to_audience">ย้ายไปยังผู้ชม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="move_to_seat">ย้ายไปนั่ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="move_to_which_seat">ย้ายไปนั่งไหน?</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="mute">ปิดเสียง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_audience_members">ไม่มีผู้ชม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_pending_requests">ไม่มีคำขอที่ค้างอยู่</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_reason_given">ไม่มีการให้เหตุผล</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_one_on_mic">ไม่มีใครเข้าไมค์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="occupied">ไม่ว่าง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="open_for_duration">เปิดสำหรับ %1$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="owner">เจ้าของ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="reason_optional">เหตุผล (ไม่บังคับ)</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="reject">ปฏิเสธ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="remove">ลบ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="remove_as_host">ลบในฐานะโฮสต์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="remove_from_room">ลบออกจากห้อง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="request">ขอ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="request_a_seat">ขอที่นั่ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="request_seat">ขอที่นั่ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="requesting">การร้องขอ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="room">ห้อง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="room_closed">ห้องปิดแล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="room_closing_no_super_shy">เจ้าของห้องไม่มี Super Shy ห้องนี้จะปิดเร็ว ๆ นี้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="room_closing_in">ห้องจะปิดใน %1$d:%2$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="room_closing_soon">ปิดห้องเร็วๆ นี้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="room_settings">การตั้งค่าห้อง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="rooms">ห้องพัก</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="seat_requests">การขอที่นั่ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="seat_swap_with">ที่นั่ง %1$d (สลับกับ %2$s)</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="set_alias">ตั้งนามแฝง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="set_alias_description">ตั้งค่านามแฝงส่วนบุคคลสำหรับ %1$s มีเพียงคุณเท่านั้นที่จะเห็นสิ่งนี้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="set_as_host">ตั้งเป็นโฮสต์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="showing_all_gift_animations">กำลังแสดงภาพเคลื่อนไหวของขวัญทั้งหมด</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="showing_animations_worth">แสดงเฉพาะภาพเคลื่อนไหวที่มีมูลค่า %1$d+ เหรียญ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="speakers">ลำโพง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="take_a_seat">นั่งลง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="unmute">เปิดเสียง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="unmuted">เปิดเสียง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="user">ผู้ใช้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="user_id">รหัส: %1$d</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="visitor_count">ผู้เยี่ยมชม %1$d คน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="voice">เสียง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="voice_unavailable">เสียงไม่พร้อมใช้งาน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="you_have_super_shy_room">คุณมี Super Shy! เปิดห้องของคุณเองเพื่อขยายเวลาออกไปสูงสุด %1$d ชั่วโมง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="get_super_shy_rooms">ขี้อายสุดๆ เพื่อเพลิดเพลินกับห้องที่ใช้งานได้นานถึง %1$d ชั่วโมง!</string>
+
+    <!-- Room - Notifications -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="accept">ยอมรับ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="decline">ปฏิเสธ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="go_back">กลับไป</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="go_to_seat">ไปที่ที่นั่ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="invited_to_sit">คุณได้รับเชิญให้นั่ง!</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="request_accepted">คำขอของคุณได้รับการยอมรับแล้ว!</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="seat_number">ที่นั่ง %1$d</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="user_wants_to_sit">%1$s ต้องการนั่ง</string>
+
+    <!-- Room - Chat -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="cancel_edit">ยกเลิกการแก้ไข</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="edit_message_placeholder">แก้ไขข้อความ...</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="message_placeholder">ข้อความ...</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="new_messages">ข้อความใหม่</string>
+
+    <!-- Room - Backpack -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="action_cannot_be_undone">การดำเนินการนี้ไม่สามารถยกเลิกได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="confirm_send">ยืนยันการส่ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="from_backpack_items">จากกระเป๋าเป้สะพายหลัง: %1$d รายการ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="gifts">ของขวัญ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="send_all">ส่งทั้งหมด</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="send_all_includes">ซึ่งรวมถึงสินค้าทั้งหมด %1$d รายการจากของขวัญที่แตกต่างกัน %2$d รายการ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="send_all_warning">คุณกำลังจะส่งกระเป๋าเป้ทั้งใบของคุณไปที่ %1$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="send_everything_confirm">เข้าใจแล้วส่งทุกอย่าง.</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="to_label">ถึง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="total_cost_coins">ราคาทั้งหมด: %1$d เหรียญ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="use_button">ใช้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="you_have_count">คุณมี: %1$d</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="your_balance_coins">ยอดคงเหลือของคุณ: %1$d เหรียญ</string>
+
+    <!-- Messaging -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="additional_details_optional">รายละเอียดเพิ่มเติม (ไม่บังคับ)</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="all_admins_and_mods">ผู้ดูแลระบบและม็อดทั้งหมด</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="attach_evidence">แนบหลักฐาน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="cant_message_user">คุณไม่สามารถส่งข้อความถึงผู้ใช้รายนี้ได้</string>
+    <string name="group_frozen_banner">This group has been preserved but no new members can be added, as part of a recent change to how ShyTalk organises accounts.</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pm_locked_other_user_notice">คุณไม่สามารถส่งข้อความถึงบุคคลนี้ได้เนื่องจากเราเชื่อว่าพวกเขาอายุต่ำกว่า 18 ปี</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="chat">แชท</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="close_group">ปิดกลุ่ม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="close_group_warning">การดำเนินการนี้จะปิดกลุ่มสำหรับทุกคน ข้อความจะถูกเก็บไว้เพื่อการกลั่นกรอง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="compressing">กำลังบีบอัด...</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="conversation_start_hint">เริ่มการสนทนาจาก\nโปรไฟล์ของใครบางคนหรือการ์ดผู้ใช้ในห้อง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="create_group">สร้างกลุ่ม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="current_version">ปัจจุบัน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="delete_conversation">ลบการสนทนา</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="delete_conversation_warning">การดำเนินการนี้จะลบการสนทนาออกจากรายการของคุณ ข้อความจะถูกเก็บรักษาไว้และจะปรากฏขึ้นอีกครั้งหากอีกฝ่ายส่งข้อความถึงคุณอีกครั้ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="description_label">คำอธิบาย</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="description_optional">คำอธิบาย (ไม่บังคับ)</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="edit_history">แก้ไขประวัติ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="editing_message">การแก้ไขข้อความ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="evidence">หลักฐาน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="evidence_required">ต้องมีภาพหน้าจอหรือการบันทึกอย่างน้อยหนึ่งภาพ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="general">ทั่วไป</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="group">กลุ่ม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="group_chat">แชทกลุ่ม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="group_name_label">ชื่อกลุ่ม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="group_name_required">ชื่อกลุ่ม *</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="group_settings">การตั้งค่ากลุ่ม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="invite_to_room">เชิญเข้าห้อง.</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="last_seen">เห็นครั้งล่าสุด %1$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="leave_group">ออกจากกลุ่ม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="members">สมาชิก</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="members_count">สมาชิก %1$d คน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="message_ellipsis">ข้อความ...</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="message_permissions">สิทธิ์ในการส่งข้อความ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="message_preview_image">[ภาพ]</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="message_preview_recalled">[ข้อความที่ถูกเรียกคืน]</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="message_preview_room_invite">[เชิญห้อง]</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="message_preview_sticker">[สติ๊กเกอร์]</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="messages">ข้อความ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="mod_notifications">การแจ้งเตือนของ Mod</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="move_to_front">ย้ายไปด้านหน้า</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="mute_notifications">ปิดเสียงการแจ้งเตือน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="mute_reason">. เหตุผล: %1$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="muted">ปิดเสียง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="muted_for_hours_minutes">คุณถูกปิดเสียงเป็นเวลา %1$dh %2$dm</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="muted_for_minutes">คุณถูกปิดเสียงเป็นเวลา %1$dm</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="muted_indefinitely">คุณถูกปิดเสียง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="new_group">กลุ่มใหม่</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="new_group_selected">กลุ่มใหม่ (เลือกแล้ว %1$d)</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="new_message">ข้อความใหม่</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_action_needed">ไม่จำเป็นต้องดำเนินการใดๆ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_followers_following_found">ไม่พบผู้ติดตามหรือผู้ติดตาม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_matches_found">ไม่พบรายการที่ตรงกัน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_messages">ยังไม่มีข้อความ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_pending_reports">ไม่มีรายงานที่รอดำเนินการ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_stickers_yet">ยังไม่มีสติกเกอร์ครับ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_users_found">ไม่พบผู้ใช้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="notify_owner_only">แจ้งเจ้าของเท่านั้น</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="online">ออนไลน์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="only_admins_can_send">เฉพาะผู้ดูแลระบบและ mod เท่านั้นที่สามารถส่งข้อความในกลุ่มนี้ได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="only_owner_can_change_permissions">มีเพียงเจ้าของกลุ่มเท่านั้นที่สามารถเปลี่ยนสิทธิ์ได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="owner_only">เฉพาะเจ้าของเท่านั้น</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="participants">ผู้เข้าร่วม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="participants_count">ผู้เข้าร่วม (%1$d)</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin">เข็มหมุด</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="recent">ล่าสุด</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="replying_to">กำลังตอบกลับ %1$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="report_message_prompt">เหตุใดคุณจึงรายงานข้อความนี้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="report_review">รายงานการตรวจสอบ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="report_user">รายงาน %1$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="report_user_prompt">เหตุใดคุณจึงรายงานผู้ใช้รายนี้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="reset_to_default">รีเซ็ตเป็นค่าเริ่มต้น</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="result_count">%1$d ผลลัพธ์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="review_report">รายงานการตรวจสอบ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="role_admin">ผู้ดูแลระบบ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="role_member">สมาชิก</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="role_mod">มด</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="role_owner">เจ้าของ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="save_description">บันทึกคำอธิบาย</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="search_all_users">ค้นหาผู้ใช้ทั้งหมด</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="search_conversations">ค้นหาการสนทนา...</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="search_messages">ค้นหาข้อความ...</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="search_people">ค้นหาคน...</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="select_action">เลือกการกระทำ:</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="selected_count">เลือก %1$d แล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="start_conversation">เริ่มการสนทนา</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="submit_report">ส่งรายงาน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="submitting">กำลังส่ง...</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="system_messages">ข้อความระบบ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="transfer_ownership">โอนกรรมสิทธิ์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="transfer_ownership_warning">เลือกสมาชิกที่จะโอนกรรมสิทธิ์ให้ คุณจะสูญเสียสิทธิพิเศษของเจ้าของ สิ่งนี้ไม่สามารถยกเลิกได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="type_message">พิมพ์ข้อความ...</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="typing">กำลังพิมพ์...</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="unmute_action">เปิดเสียง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="unmute_notifications">เปิดเสียงการแจ้งเตือน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="unpin">เลิกปักหมุด</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="view_profile">ดูโปรไฟล์</string>
+
+    <!-- Messaging - report reasons -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="report_reason_spam">สแปม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="report_reason_harassment">การล่วงละเมิด</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="report_reason_inappropriate">เนื้อหาที่ไม่เหมาะสม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="report_reason_other">อื่น</string>
+
+    <!-- Messaging - report actions -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="report_action_warning">คำเตือนปัญหา</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="report_action_temp_suspension">การระงับชั่วคราว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="report_action_perm_suspension">การระงับถาวร</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="report_action_pm_ban">แบนจาก PM</string>
+
+    <!-- Messaging - report details -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="report_reason_prefix">เหตุผล: %1$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="report_type_prefix">ประเภท: %1$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="report_details_prefix">รายละเอียด: %1$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="report_message_prefix">ข้อความ: \"%1$s\"</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="report_reporter_reported">ผู้รายงาน: %1$s | รายงานแล้ว: %2$s</string>
+
+    <!-- Messaging - system message labels -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="sys_member_joins">สมาชิกเข้าร่วม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="sys_member_leaves">สมาชิกลาออก</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="sys_role_changes">การเปลี่ยนแปลงบทบาท</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="sys_permission_changes">การเปลี่ยนแปลงสิทธิ์</string>
+
+    <!-- Messaging - permission labels -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="perm_who_can_send">ใครสามารถส่งข้อความได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="perm_who_can_add_members">ใครสามารถเพิ่มสมาชิกได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="perm_who_can_edit_info">ใครสามารถแก้ไขข้อมูลกลุ่มได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="perm_who_can_delete_messages">ใครสามารถลบข้อความได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="perm_who_can_mute_members">ใครสามารถปิดเสียงสมาชิกได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="perm_who_can_remove_members">ใครสามารถลบสมาชิกออกได้</string>
+
+    <!-- Messaging - date separators -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="today">วันนี้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="yesterday">เมื่อวาน</string>
+
+    <!-- Daily Reward -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="awesome">สุดยอด!</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="claim_todays_reward">รับรางวัลวันนี้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="coins">เหรียญ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="day_fri">ศุกร์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="day_mon">จันทร์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="day_sat">นั่ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="day_streak">%1$d วันติดต่อกัน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="day_sun">ดวงอาทิตย์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="day_thu">พฤ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="day_tue">อ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="day_wed">พ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="later">ภายหลัง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="milestone">เหตุการณ์สำคัญ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="milestone_bonus">โบนัสขั้นเทพ!</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="plus_coins">+%1$d เหรียญ!</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="reward_claimed">รับรางวัลแล้ว!</string>
+
+    <!-- Economy -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="bean_redeem_description">1 ถั่ว = 1 เหรียญ แลก 2,000+ เพื่อรับโบนัส 10%!</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="bonus_coins">+%1$d โบนัส</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="buy_shy_coins">ซื้อเหรียญขี้อาย</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="confirm_redemption">ยืนยันการไถ่ถอน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="daily_reward">รางวัลรายวัน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="redeem">ไถ่ถอน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="redeem_all">แลกทั้งหมด</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="redeem_beans_for_coins">แลกถั่ว %1$s เป็นเหรียญ %2$s หรือไม่</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="redeem_shy_beans">แลกถั่วขี้อาย</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="send_gift">ส่งของขวัญ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="shy_beans">ขี้อาย</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="shy_coins">ShyCoins</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="filter_all">ทั้งหมด</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="filter_gacha">กาชา</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="filter_gifts">ของขวัญ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="filter_purchases">การซื้อ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="filter_redemptions">การไถ่ถอน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="filter_rewards">รางวัล</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_filtered_transactions">ไม่มีธุรกรรม %1$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_transactions_yet">ยังไม่มีการทำธุรกรรม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="transaction_history">ประวัติการทำธุรกรรม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="transactions">การทำธุรกรรม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="wallet">กระเป๋าสตางค์</string>
+
+    <!-- Super Shy -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="benefit_daily_bonus">+10% เหรียญเข้าสู่ระบบรายวัน (ปัดเศษขึ้น)</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="benefit_extended_room">ขยายระยะเวลาห้อง (12 ชั่วโมง)</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="benefit_full_room">เต็มห้อง 8 ที่นั่ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="benefit_gold_name">ชื่อที่แสดงสีทองทุกที่</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="benefit_profile_frame">กรอบโปรไฟล์พิเศษ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="benefit_star_badge">ป้ายดาวติดกับชื่อ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="benefits">ประโยชน์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="choose_a_plan">เลือกแผน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="claim_30_days_free">รับสิทธิ์ใช้งานฟรี 30 วัน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="claimed">อ้างแล้ว!</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="claimed_activate_backpack">หากต้องการเปิดใช้งาน ให้ค้นหามันในกระเป๋าเป้สะพายหลังของคุณขณะอยู่ในห้องสนทนา</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="claiming">กำลังอ้างสิทธิ์...</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="currently_active">ใช้งานอยู่ในปัจจุบัน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="days_remaining">เหลืออีก %1$d วัน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="one_time_payment">ชำระเงินครั้งเดียว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="per_month">ต่อเดือน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="per_year">ต่อปี</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="super_shy">ขี้อายสุด ๆ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="super_shy_for_life">คุณขี้อายสุด ๆ ไปตลอดชีวิต!</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="tap_to_claim_backpack">แตะเพื่อรับสิทธิ์ — เพิ่มลงในกระเป๋าเป้สะพายหลังของคุณ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="testing_mode_super_shy">โหมดการทดสอบ — ไม่มีการคิดเงินจริง แตะแผนเพื่อเปิดใช้งาน Super Shy ทันที</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="tier_label">ระดับ: %1$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="tier_lifetime">ตลอดชีวิต</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="tier_monthly">รายเดือน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="tier_yearly">เป็นประจำทุกปี</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="upgrade_to_lifetime">อัปเกรดเป็นอายุการใช้งาน</string>
+
+    <!-- Legal -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="accept_all_and_continue">ยอมรับทั้งหมดและดำเนินการต่อ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="community_standards">มาตรฐานชุมชน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="cyber_bullying_policy">นโยบายการกลั่นแกล้งในโลกไซเบอร์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="i_have_read_and_agree">ฉันได้อ่านและเห็นด้วยกับ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="privacy_policy">นโยบายความเป็นส่วนตัว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="review_and_accept_policies">โปรดตรวจสอบและยอมรับนโยบายของเราเพื่อดำเนินการต่อ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="terms_and_conditions">ข้อกำหนดและเงื่อนไข</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="welcome_to_shytalk">ยินดีต้อนรับสู่ ShyTalk</string>
+
+    <!-- Auth -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="sign_in">เข้าสู่ระบบ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="verification_code">รหัสยืนยัน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="continue_with_google">ดำเนินการต่อด้วย Google</string>
+
+    <!-- Missing translations (English fallback) -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="account_restricted">บัญชีถูกจำกัด</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="account_suspended_description">บัญชีผู้ใช้นี้ถูกระงับ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="account_suspended_label">บัญชีถูกระงับ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="active_days_ago">ใช้งานเมื่อ %1$dd ที่แล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="active_hours_ago">ใช้งานอยู่ %1$dh ที่แล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="active_just_now">ใช้งานอยู่เมื่อสักครู่นี้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="active_long_ago">ใช้งานเมื่อ 30+ วันที่ผ่านมา</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="active_minutes_ago">ใช้งานอยู่ %1$dm ที่แล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="allow">อนุญาต</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="allowed">อนุญาต</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="appeal">อุทธรณ์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="appeal_not_eligible">คุณไม่มีสิทธิ์อุทธรณ์การระงับนี้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="appeal_placeholder">อธิบายว่าเหตุใดคุณจึงควรยกเลิกการระงับ...</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="appeal_submitted">การอุทธรณ์ของคุณถูกส่งไปแล้วและจะได้รับการตรวจสอบ หากสำเร็จ การระงับของคุณจะถูกยกเลิกการระงับ คุณจะไม่ได้รับความคิดเห็นเพิ่มเติมเกี่ยวกับการอุทธรณ์ของคุณและคุณไม่สามารถส่งการอุทธรณ์ได้อีก</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="appeal_unsuccessful">การอุทธรณ์ของคุณได้รับการตรวจสอบแล้วและไม่ประสบผลสำเร็จ คุณไม่สามารถยื่นอุทธรณ์ได้อีก</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="ban_expires">หมดอายุ: %1$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="ban_permanent">การแบนนี้จะมีผลถาวร</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="suspension_also_device_banned">อุปกรณ์ของคุณก็ถูกแบนเช่นกัน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="suspension_also_network_banned">เครือข่ายของคุณก็ถูกแบนเช่นกัน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="suspension_also_device_and_network_banned">อุปกรณ์และเครือข่ายของคุณก็ถูกแบนเช่นกัน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="ban_reason">เหตุผล: %1$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="banned_by">ถูกแบนโดย: %1$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="banned_from_room">ห้ามออกจากห้อง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="block_confirm">บล็อก %1$s หรือไม่</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="block_description">พวกเขาจะไม่สามารถดูโปรไฟล์ของคุณได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="blocked_by_user">คุณถูกบล็อกโดยผู้ใช้รายนี้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="blocked_by_user_in_room_description">ผู้ใช้ในห้องนี้บล็อกคุณ คุณอาจมีประสบการณ์ที่จำกัด เข้ารึยัง?</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="blocked_user_in_room">ผู้ใช้ที่ถูกบล็อกในห้อง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="blocked_user_in_room_description">ผู้ใช้ที่คุณบล็อกอยู่ในห้องนี้ พวกเขาจะสามารถสื่อสารกับคุณได้ เข้ารึยัง?</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="bluetooth">บลูทูธ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="bluetooth_description">เชื่อมต่อกับอุปกรณ์เสียง Bluetooth ระหว่างการแชทด้วยเสียง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="cache_cleared">ล้างแคชแล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="cache_cleared_description">ล้างแคชของแอปแล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="cannot_enter_room">เข้าห้องไม่ได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="chat_display">การแสดงแชท</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="check_for_updates">ตรวจสอบการอัปเดต</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="checking_for_updates">กำลังตรวจสอบการอัปเดต...</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="choose_another_room">เลือกห้องอื่น</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="clear">ชัดเจน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="clear_cache">ล้างแคช</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="clear_cache_confirm">ล้างข้อมูลแคช %1$s หรือไม่</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="clear_cache_with_size">ล้างแคช (%1$s)</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="close_room_description">การดำเนินการนี้จะปิดห้องสำหรับทุกคน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="close_room_question">ปิดห้องเหรอ?</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="closing">กำลังปิด...</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="connecting">กำลังเชื่อมต่อ...</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="connection_trouble">ShyTalk กำลังประสบปัญหาในการเข้าถึงเซิร์ฟเวอร์ของเรา โปรดตรวจสอบการเชื่อมต่ออินเทอร์เน็ตของคุณแล้วลองอีกครั้ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="contact_support_help">หากคุณต้องการความช่วยเหลือ โปรดติดต่อ shytalk.help@gmail.com</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="contact_support_hint">หากปัญหายังคงอยู่ โปรดติดต่อ shytalk.help@gmail.com</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="contact_us">ติดต่อเรา</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="shyden_ltd_brand">ShyTalk เป็นแบรนด์ของ Shyden Ltd (หมายเลขบริษัท 17110487), 71-75 Shelton Street, Covent Garden, London, WC2H 9JQ, United Kingdom</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="delete_account">ลบบัญชี</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="delete_account_description">บัญชีของคุณและข้อมูลทั้งหมดจะถูกลบอย่างถาวรหลังจากระยะเวลาผ่อนผัน คุณสามารถยกเลิกได้โดยลงชื่อเข้าใช้ก่อนเวลาดังกล่าว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="delete_account_scheduled">บัญชีของคุณมีกำหนดการลบในวันที่ %1$s คุณต้องการยกเลิกหรือไม่?</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="delete_account_cancel">ยกเลิกการลบ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="delete_account_continue">ดำเนินการต่อด้วยการลบ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="delete_account_success">บัญชีของคุณมีกำหนดการลบแล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="delete_account_pin_required">ยืนยันตัวตนของคุณเพื่อลบบัญชีของคุณ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="delete_account_confirm_title">คุณแน่ใจเหรอ?</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="delete_account_confirm_body">การดำเนินการนี้จะลบบัญชีของคุณและข้อมูลที่เกี่ยวข้องทั้งหมดอย่างถาวรหลังจากระยะเวลาผ่อนผัน การดำเนินการนี้ไม่สามารถยกเลิกได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="denied">ถูกปฏิเสธ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="description">คำอธิบาย</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="device_locked_description">อุปกรณ์นี้เชื่อมโยงกับบัญชีอื่นแล้ว\nอนุญาตให้มีหนึ่งบัญชีต่ออุปกรณ์เท่านั้น\n\nสำหรับการสนับสนุน โปรดติดต่อ shytalk.help@gmail.com</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="device_not_supported">ไม่รองรับอุปกรณ์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="device_not_supported_description">ShyTalk ไม่สามารถทำงานบนอุปกรณ์ที่รูทหรือจำลองได้ กรุณาใช้อุปกรณ์ที่ไม่มีการดัดแปลง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="display_over_other_apps">แสดงเหนือแอปอื่นๆ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="display_over_other_apps_description">อนุญาตให้ ShyTalk แสดงฟองอากาศแบบลอยเมื่อคุณออกจากห้องเสียง เพื่อให้คุณสามารถกลับมาได้อย่างรวดเร็ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="dnd_end_time">เวลาสิ้นสุด DND</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="dnd_start_time">เวลาเริ่มต้น DND</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="do_not_disturb">ห้ามรบกวน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="download_now">ดาวน์โหลดเดี๋ยวนี้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="edit_room_name">แก้ไขชื่อห้อง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="email">อีเมล</string>
+
+    <!-- Settings - Linked Accounts page -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="linked_accounts">บัญชีที่เชื่อมโยง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="linked">เชื่อมโยงแล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="unlinked">ยกเลิกการลิงก์แล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="unlink">ยกเลิกการเชื่อมโยง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="unlink_provider_confirm">ยกเลิกการเชื่อมโยง %1$s หรือไม่</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="unlink_provider_description">คุณสามารถเชื่อมโยงบัญชีนี้ใหม่ได้ในภายหลัง แต่คุณจะต้องยืนยันอีกครั้ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="cannot_unlink_last_provider">คุณต้องมีบัญชีที่เชื่อมโยงอย่างน้อยสองบัญชีก่อนจึงจะสามารถยกเลิกการเชื่อมโยงได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="provider_google">Google</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="provider_apple">แอปเปิล</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="provider_email">อีเมล</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_linked_accounts">ไม่พบบัญชีที่เชื่อมโยง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="unlinking_provider">กำลังยกเลิกการลิงก์...</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="connect_account">เชื่อมต่อบัญชี</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="connect">เชื่อมต่อ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="signed_in_with">ลงชื่อเข้าใช้ด้วย</string>
+
+    <!-- google-translated 2026-05-04 -->
+    <string name="enable_dnd">เปิดใช้งานห้ามรบกวน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="enable_dnd_description">ปิดเสียงการแจ้งเตือน PM ทั้งหมดในช่วงเวลาที่กำหนด</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="end">จบ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="enter">เข้า</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_block_user">ไม่สามารถบล็อกผู้ใช้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_check_updates">ไม่สามารถตรวจสอบการอัปเดตได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_could_not_submit_report">ไม่สามารถส่งรายงานได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_follow_user">ติดตามผู้ใช้ไม่สำเร็จ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_load_user_data">โหลดข้อมูลผู้ใช้ไม่สำเร็จ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_load_users">โหลดผู้ใช้ไม่สำเร็จ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_max_groups">คุณสามารถเป็นเจ้าของกลุ่มได้สูงสุด %1$d กลุ่ม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_max_participants">อนุญาตให้มีผู้เข้าร่วมสูงสุด %1$d คน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_no_users_selected">ไม่ได้เลือกผู้ใช้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_not_enough_beans">ถั่วไม่พอ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_not_enough_coins">เหรียญไม่พอ.</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_prices_changed">ราคามีการเปลี่ยนแปลง! โปรดตรวจสอบค่าใช้จ่ายใหม่แล้วลองอีกครั้ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_resolve_report">ไม่สามารถแก้ไขรายงานได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_save_dob">ไม่สามารถบันทึกวันเกิดได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_submit_appeal">ไม่สามารถส่งคำอุทธรณ์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_submit_report">ไม่สามารถส่งรายงานได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_title">ข้อผิดพลาด</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_unblock_user">ไม่สามารถเลิกบล็อกผู้ใช้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_unfollow_user">ไม่สามารถเลิกติดตามผู้ใช้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_update_privacy">อัปเดตการตั้งค่าความเป็นส่วนตัวไม่สำเร็จ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_upload_evidence">อัพโหลดหลักฐานไม่สำเร็จ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_upload_group_photo">อัปโหลดรูปภาพกลุ่มไม่สำเร็จ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="everyone">ทุกคน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="hide_age">ซ่อนอายุ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="hide_age_description">คนอื่นจะไม่เห็นอายุของคุณในโปรไฟล์ของคุณ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="hide_following_description">คนอื่นจะไม่เห็นว่าคุณติดตามใคร ผู้ติดตามจะมองเห็นได้เสมอ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="hide_following_list">ซ่อนรายการต่อไปนี้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="hide_online_status">ซ่อนสถานะออนไลน์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="hide_online_status_description">คนอื่นจะไม่เห็นเมื่อคุณออนไลน์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="i_understand">ฉันเข้าใจ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="i_understand_and_accept">ฉันเข้าใจและยอมรับ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="kick_reason">เหตุผล: %1$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="kicked_by_name">คุณถูกเตะโดย %1$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="kicked_from_room">คุณถูกไล่ออกจากห้องนี้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="leave">ออกจาก</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="leave_room_description">คุณจะออกจากห้องเสียง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="leave_room_question">ออกจากห้อง?</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="message_preview">ดูตัวอย่างข้อความ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="message_preview_description">แสดงข้อความในการแจ้งเตือน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="mic_permission_denied">การอนุญาตไมโครโฟนถูกปฏิเสธ คุณจะไม่สามารถใช้การแชทด้วยเสียงได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="microphone">ไมโครโฟน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="microphone_description">จำเป็นสำหรับการแชทด้วยเสียงในห้อง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="must_be_16">คุณต้องมีอายุอย่างน้อย 16 ปี</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_blocked_users">ไม่มีผู้ใช้ที่ถูกบล็อก</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_one">ไม่มีใคร</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="not_allowed_to_enter">คุณไม่ได้รับอนุญาตให้เข้าไปในห้องนี้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="not_now">ไม่ใช่ตอนนี้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="notice">สังเกต</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="notification_sound">เสียงแจ้งเตือน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="notification_sound_description">เล่นเสียงเมื่อมีข้อความใหม่เข้ามา</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="notifications_permission_description">รับการแจ้งเตือนเมื่อคุณอยู่ในห้องถ่ายทอดสดในเบื้องหลัง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="official_warning">คำเตือนอย่างเป็นทางการ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="overlay_permission_description">แสดงฟองอากาศที่ลอยเมื่อคุณออกจากห้องเสียง เพื่อให้คุณสามารถกลับมาได้อย่างรวดเร็ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="people_i_follow">คนที่ฉันติดตาม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pm_notifications">การแจ้งเตือน PM</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pm_notifications_description">รับการแจ้งเตือนสำหรับข้อความส่วนตัวใหม่</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="private_messages">ข้อความส่วนตัว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="profile_not_available">โปรไฟล์นี้ไม่พร้อมใช้งาน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="profile_not_found">ไม่พบโปรไฟล์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="removed_from_room">ลบออกจากห้องแล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="report_thank_you">ขอบคุณสำหรับรายงานของคุณ เราจะตรวจสอบในไม่ช้า</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="report_user_generic">รายงานผู้ใช้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="retrying">กำลังลองอีกครั้ง...</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="room_alerts">การแจ้งเตือนห้อง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="self_destruct_countdown">นับถอยหลังการทำลายตนเอง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="self_destruct_description">เล่นเสียงประกาศเมื่อตัวจับเวลาทำลายตัวเอง 5 นาทีของห้องเริ่มหรือหยุด</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="show_date_separators">แสดงตัวคั่นวันที่</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="show_date_separators_description">แสดงป้ายกำกับวันที่ระหว่างข้อความในแต่ละวัน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="show_timestamps">แสดงการประทับเวลา</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="show_timestamps_description">แสดงการประทับเวลาข้อความในการแชท</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="shytalk_id">อายทอล์คไอดี</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="sign_in_with_google">ลงชื่อเข้าใช้งานด้วย Google</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="sign_in_with_email">เข้าสู่ระบบด้วยอีเมล</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="email_hint">ที่อยู่อีเมล</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="email_link_sent">ตรวจสอบอีเมลของคุณ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="check_your_email_description">เราได้ส่งลิงก์ลงชื่อเข้าใช้ไปยังอีเมลของคุณ แตะลิงก์เพื่อดำเนินการต่อ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="signing_in">กำลังลงชื่อเข้าใช้...</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_disposable_email">ไม่อนุญาตให้ใช้ที่อยู่อีเมลแบบใช้แล้วทิ้ง กรุณาใช้ที่อยู่อีเมลถาวร</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="stalkers">สตอล์กเกอร์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="start">เริ่ม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="submit_appeal">ยื่นอุทธรณ์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="success_coins_added">เพิ่มเหรียญ +%1$s แล้ว!</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="success_purchase">ซื้อสำเร็จ!</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="success_redeemed_beans">แลกถั่ว %1$s แล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="success_redeemed_beans_bonus">แลกถั่ว %1$s แล้ว (โบนัส 10%%!)</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="success_report_resolved">รายงานได้รับการแก้ไขแล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="success_sent_backpack">กระเป๋าเป้ทั้งหมด (%1$d รายการ)</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="success_super_shy_activated">เปิดใช้งาน Super Shy แล้ว! +30 วัน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="super_shy_days">เขินสุดๆ ✦ %1$dd</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="super_shy_lifetime">เขินสุดๆ ✦ ตลอดชีวิต</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="support_contact">สำหรับการสนับสนุนโปรดติดต่อ shytalk.help@gmail.com</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="suspension_ends_at">สิ้นสุด: %1$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="suspension_ends_in">การระงับของคุณจะสิ้นสุดใน:</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="suspension_login_again">คุณสามารถเข้าสู่ระบบอีกครั้งได้แล้ว\nครั้งนี้ให้ดี!</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="suspension_permanent">การระงับนี้จะมีผลถาวร</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="suspension_reason">เหตุผล: %1$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="tap_to_return">แตะเพื่อกลับ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="technical_difficulties">ความยากลำบากทางเทคนิค</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="technical_difficulties_description">ขณะนี้ ShyTalk กำลังประสบปัญหาทางเทคนิค คุณสมบัติบางอย่างอาจทำงานไม่ถูกต้อง บริการจะถูกกู้คืนโดยอัตโนมัติ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="unable_to_connect">ไม่สามารถเชื่อมต่อได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="unblock_confirm">เลิกบล็อก %1$s หรือไม่</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="unblock_description">พวกเขาจะสามารถดูโปรไฟล์ของคุณได้อีกครั้ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="up_to_date">ถึงวันที่</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="up_to_date_description">คุณกำลังใช้เวอร์ชันล่าสุด</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="update_available">อัปเดตพร้อมใช้งาน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="update_available_description">มีเวอร์ชัน %1$s แล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="update_available_soft">ShyTalk เวอร์ชันใหม่ (%1$s) พร้อมใช้งานแล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="update_now">อัปเดตทันที</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="update_required">จำเป็นต้องอัปเดต</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="update_required_description">ShyTalk เวอร์ชันใหม่พร้อมใช้งานแล้ว โปรดอัปเดตเพื่อใช้แอปต่อไป</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="update_open_store_failed">ไม่สามารถเปิด App Store โดยอัตโนมัติได้ โปรดอัปเดต ShyTalk ด้วยตนเองจาก App Store ของอุปกรณ์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="view_community_standards">ดูมาตรฐานชุมชน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="voice_chat_reimagined">ห้องแชทด้วยเสียงโฉมใหม่</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="voice_chat_unavailable">การแชทด้วยเสียงไม่สามารถใช้งานได้ชั่วคราว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="wallet_with_balance">กระเป๋าเงิน · %1$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="warning_consequence">การละเมิดอย่างต่อเนื่องอาจส่งผลให้บัญชีของคุณถูกระงับ</string>
+    <string name="warning_acknowledge_failed">ไม่สามารถล้างคำเตือนของคุณได้ โปรดตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="warning_reviewed">บัญชีของคุณได้รับการตรวจสอบแล้วและมีการออกคำเตือนแล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="warning_reviewed_for_reason">บัญชีของคุณได้รับการตรวจสอบสำหรับ %1$s และมีการออกคำเตือนแล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="who_can_message_description">ควบคุมว่าใครสามารถส่งข้อความส่วนตัวถึงคุณได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="who_can_message_me">ใครสามารถส่งข้อความถึงฉันได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="you_were_banned">คุณถูกห้ามไม่ให้เข้าห้องนี้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="getting_ready">เตรียมพร้อม…</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="send_all_warning_title">⚠️คำเตือน ⚠️</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="send_all_total_value">มูลค่ารวม: 🪙 %1$d เหรียญ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="send_gift_header">ส่ง %1$dx %2$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="send_gift_header_multiple">ส่ง %1$dx %2$s ไปยังผู้ใช้ %3$d</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="owner_away_banner">เจ้าของออกไป - ห้องจะปิดใน %1$s</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="messages_title">ข้อความ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="no_conversations_yet">ยังไม่มีการสนทนา</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="spin_again_with_cost">%1$s หมุนอีกครั้ง · 🪙%2$d</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_years_old">%1$d ปี</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="show_less">น้อย</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="show_more">มากกว่า</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="video_too_large">วิดีโอมีขนาดใหญ่เกินกว่าจะอัปโหลด กรุณาใช้คลิปที่สั้นกว่านี้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="file_too_large">ไฟล์มีขนาดใหญ่เกินไป ขนาดสูงสุดคือ 10 MB</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="this_user">ผู้ใช้รายนี้</string>
+
+    <!-- Degraded Mode Banner -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="reduced_functionality">ฟังก์ชั่นลดลง — คุณสมบัติบางอย่างอาจไม่พร้อมใช้งาน</string>
+    <string name="notifications_disabled_banner_title">ปิดการแจ้งเตือน</string>
+    <string name="notifications_disabled_banner_action">เปิดการตั้งค่า</string>
+
+    <!-- Fullscreen Image Viewer -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="image_number">รูปภาพ %1$d</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="page_indicator">%1$d / %2$d</string>
+
+    <!-- Broadcast Banner -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="broadcast_gacha_win">%1$s ชนะ %2$s%3$s%4$s จาก Lucky Spin!</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="broadcast_gift_sent">%1$s ส่ง %2$s%3$s%4$s ถึง %5$s!</string>
+
+    <!-- google-translated 2026-05-04 -->
+    <string name="play_effect">เล่นเอฟเฟกต์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="account_unlocked">บัญชีถูกปลดล็อค</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="account_suspended">บัญชีถูกระงับ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="police_duck_description">เป็ดตำรวจ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="device_banned_title">อุปกรณ์ถูกแบน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="network_banned_title">เครือข่ายถูกแบน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="device_banned_description">อุปกรณ์นี้ถูกห้ามไม่ให้ใช้ ShyTalk</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="network_banned_description">เครือข่ายของคุณถูกห้ามไม่ให้ใช้ ShyTalk ลองเชื่อมต่อจากเครือข่ายอื่น</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="full_screen_photo">ภาพถ่ายเต็มหน้าจอ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="cover_photo">ภาพปก</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="change_cover_photo">เปลี่ยนภาพปก</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="profile_photo">รูปโปรไฟล์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="change_profile_photo">เปลี่ยนรูปโปรไฟล์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="edit_profile">แก้ไขโปรไฟล์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="app_name_label">อายทอล์ค</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="time_unit_day">วัน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="time_unit_hour">ทรัพยากรบุคคล</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="time_unit_minute">นาที</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="time_unit_second">วินาที</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="time_unit_millisecond">นางสาว</string>
+
+    <!-- google-translated 2026-05-04 -->
+    <string name="splash_tagline">ห้องแชทด้วยเสียงโฉมใหม่</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="quantity_all">ทั้งหมด (%1$d)</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="english_language">ภาษาอังกฤษ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="google_sign_in_failed">การลงชื่อเข้าใช้ Google ล้มเหลว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="apple_sign_in_failed">การลงชื่อเข้าใช้ Apple ล้มเหลว</string>
+    <string name="sign_in_not_available_on_local">ไม่สามารถลงชื่อเข้าใช้ในสภาพแวดล้อมท้องถิ่นได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="sign_in_with_apple">ลงชื่อเข้าใช้ด้วย Apple</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="send_link">ส่งลิงค์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="paste_link">วางลิงค์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="resend_link">ส่งอีกครั้ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="use_different_email">ใช้อีเมลอื่น</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="email_link_paste_hint">เปิดลิงก์ในอีเมลของคุณ จากนั้นกลับมาแล้วแตะวางลิงก์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="error_invalid_email_link">ดูเหมือนจะไม่ใช่ลิงก์ลงชื่อเข้าใช้ที่ถูกต้อง กรุณาวางลิงก์แบบเต็มจากอีเมลของคุณ</string>
+
+    <!-- PIN & Security -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="enter_pin">ป้อนรหัส PIN ของคุณ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_mismatch">PIN ไม่ตรงกัน ลองอีกครั้ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_locked">มีความพยายามมากเกินไป ลองอีกครั้งใน %1$d นาที</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_locked_reauth">บัญชีถูกล็อค โปรดลงชื่อเข้าใช้อีกครั้งเพื่อรีเซ็ต PIN ของคุณ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="reset_pin">รีเซ็ต PIN</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="account_locked">บัญชีถูกล็อค</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="unlock">ปลดล็อค</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="enable">เปิดใช้งาน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="too_many_requests">คำขอมากเกินไป ลองอีกครั้งในภายหลัง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="verify">ตรวจสอบ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="security">ความปลอดภัย</string>
+    <!-- Starting Screens -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="starting_screen_pre_launch_title">ShyTalk ยังไม่พร้อมใช้งาน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="starting_screen_pre_launch_message">ShyTalk ยังไม่ออก หากต้องการสมัครทดสอบแอปพลิเคชันโปรดติดต่อ Shyden การทดสอบมีให้สำหรับผู้ใช้ iOS และ Android</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="starting_screen_dismiss">ดำเนินการต่อ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="starting_screen_police_duck_description">ภาพประกอบคำเตือน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="starting_screen_loading">กำลังโหลด\u2026</string>
+    <!-- Security -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="security_title">ความปลอดภัย</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="security_app_lock">ล็อคแอพ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="security_app_lock_desc">ต้องใช้ PIN หรือไบโอเมตริกซ์เพื่อปลดล็อก</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="security_lock_timeout">ล็อคหมดเวลา</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="security_timeout_1min">1 นาที</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="security_timeout_5min">5 นาที</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="security_timeout_15min">15 นาที</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="security_timeout_30min">30 นาที</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="security_timeout_never">ไม่เคย</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="security_biometric_login">เข้าสู่ระบบไบโอเมตริกซ์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="security_biometric_desc">ใช้ลายนิ้วมือหรือใบหน้าเพื่อปลดล็อค</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="security_biometric_unavailable">ไม่พร้อมใช้งานบนอุปกรณ์นี้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="security_reset_pin">รีเซ็ต PIN</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="security_reset_pin_desc">ยืนยันตัวตนของคุณเพื่อตั้งค่า PIN ใหม่</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="security_linked_accounts">บัญชีที่เชื่อมโยง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="security_linked_accounts_desc">จัดการวิธีการลงชื่อเข้าใช้</string>
+    <!-- Email sign-in -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="email_sign_in_title">เข้าสู่ระบบด้วยอีเมล</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="email_enter_address">ป้อนที่อยู่อีเมลของคุณ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="email_label">อีเมล</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="email_send_code">ส่งรหัส</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="email_code_sent_to">รหัสส่งไปที่</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="email_code_label">รหัส 6 หลัก</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="email_verify">ตรวจสอบ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="email_resend_in">ส่งอีกครั้งใน %1$ds</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="email_resend_code">ส่งรหัสอีกครั้ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="email_code_expires">รหัสจะหมดอายุใน 10 นาที</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="email_invalid_address">ป้อนที่อยู่อีเมลที่ถูกต้อง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="email_disposable_blocked">ไม่อนุญาตให้ใช้ที่อยู่อีเมลแบบใช้แล้วทิ้ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="email_send_failed">ไม่สามารถส่งรหัสได้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="email_enter_code">กรอกรหัส 6 หลัก</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="email_invalid_code">รหัสไม่ถูกต้อง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="email_resend_failed">ไม่สามารถส่งอีกครั้ง</string>
+    <!-- PIN -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_create_title">สร้างรหัส PIN</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_confirm_title">ยืนยันรหัส PIN ของคุณ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_enable_biometric_title">เปิดใช้งานการเข้าสู่ระบบไบโอเมตริกซ์ไหม</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_enable_biometric_desc">ใช้ลายนิ้วมือหรือใบหน้าของคุณเพื่อปลดล็อค ShyTalk อย่างรวดเร็ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_enable">เปิดใช้งาน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_not_now">ไม่ใช่ตอนนี้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_change_hint">คุณสามารถเปลี่ยนหรือปิดใช้งานได้ในการตั้งค่าความปลอดภัย</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_choose_length">เลือกความยาว PIN</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_digits">ตัวเลข</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_confirm">ยืนยัน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_next">ต่อไป</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_enter_digits">ป้อน %1$d หลัก</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_device_not_registered">ไม่ได้ลงทะเบียนอุปกรณ์ กรุณาเข้าสู่ระบบอีกครั้ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_setup_failed">ไม่สามารถตั้งค่า PIN</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_too_short">PIN สั้นเกินไป</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_verify_title">ยืนยันตัวตนของคุณ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_verify_subtitle">ป้อน PIN ของคุณเพื่อดำเนินการต่อ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_verifying">กำลังยืนยัน\u2026</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_wrong_attempts">PIN ผิด เหลือความพยายามอีก %1$d ครั้ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_account_locked">บัญชีถูกล็อค</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_verify_failed">การยืนยันล้มเหลว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_session_expired">เซสชั่นหมดอายุแล้ว กรุณาเข้าสู่ระบบอีกครั้ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_use_biometric">ใช้ไบโอเมตริกซ์</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_delete">ลบ</string>
+    <!-- Biometric -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="biometric_unlock_title">ปลดล็อค ShyTalk</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="biometric_unlock_desc">ใช้ลายนิ้วมือหรือใบหน้าของคุณเพื่อปลดล็อค</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="biometric_sign_failed">การลงนามล้มเหลว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="biometric_verify_failed">การยืนยันไบโอเมตริกซ์ล้มเหลว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="biometric_start_failed">ไม่สามารถเริ่มการยืนยันไบโอเมตริกซ์ได้</string>
+    <!-- Auth loading -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="signing_in_loading">กำลังลงชื่อเข้าใช้\u2026</string>
+    <!-- Time -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="time_just_now">แค่ตอนนี้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="time_minutes_ago">%1$d นาทีที่แล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="time_hours_ago">%1$d ชม. ที่แล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="time_days_ago">%1$d วันที่ผ่านมา</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="time_expired">หมดอายุแล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="time_days">%1$d วัน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="time_hours">%1$d ชั่วโมง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="time_minutes">%1$d นาที</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="time_less_than_minute">ไม่ถึง 1 นาที</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="pin_dots_state">ป้อน %1$d จาก %2$d หลักแล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="export_data">ส่งออกข้อมูลของฉัน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="export_data_pending">ร้องขอการส่งออก ตรวจสอบอีเมลของคุณเพื่อดูลิงก์ดาวน์โหลด</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="replace_room_title">ปิดห้องที่มีอยู่?</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="replace_room_message">คุณมีห้องที่ใช้งานอยู่แล้ว การเปิดห้องใหม่จะเป็นการปิดห้องที่มีอยู่ คุณต้องการดำเนินการต่อหรือไม่?</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="replace_room_confirm">ปิดและสร้างใหม่</string>
+
+    <!-- Seasonal Events -->
+    <!-- google-translated 2026-05-04 -->
+    <string name="seasonal_khmer_new_year_greeting">สวัสดีปีใหม่เขมร!</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="seasonal_khmer_new_year_cta">เรียนรู้เกี่ยวกับ Choul Chnam Thmey</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="seasonal_event_dismiss">อนุญาตให้ออกไป</string>
+
+    <!-- translated 2026-06-01 -->
+    <string name="account_error_title">บัญชีต้องการความสนใจ</string>
+    <!-- translated 2026-06-01 -->
+    <string name="account_error_body">บัญชีของคุณมีปัญหาที่เราไม่สามารถแก้ไขโดยอัตโนมัติได้ โปรดติดต่อทีมสนับสนุนของเราพร้อมแจ้งรหัสข้อผิดพลาดด้านล่าง — พวกเขาจะแก้ไขให้คุณ</string>
+    <!-- translated 2026-06-01 -->
+    <string name="account_error_code_label">รหัสข้อผิดพลาด: %1$s</string>
+    <!-- translated 2026-06-01 -->
+    <string name="account_error_sign_out">ออกจากระบบ</string>
+    <!-- translated 2026-06-01 -->
+    <string name="age_restriction_needs_verification_title">ยืนยันอายุของคุณ</string>
+    <!-- translated 2026-06-01 -->
+    <string name="age_restriction_needs_verification_body">ข้อความส่วนตัวและกาชาเป็นฟีเจอร์สำหรับผู้ใช้อายุ 18 ปีขึ้นไป ในการใช้งาน โปรดยืนยันอายุของคุณโดยส่งบัตรประจำตัวที่ออกโดยรัฐบาล รูปภาพจะได้รับการตรวจสอบโดยมนุษย์และลบทันทีที่มีการตัดสินใจ</string>
+    <!-- translated 2026-06-01 -->
+    <string name="age_restriction_needs_verification_confirm">ยืนยันตอนนี้</string>
+    <!-- translated 2026-06-01 -->
+    <string name="age_restriction_sub_eighteen_title">ฟีเจอร์ไม่พร้อมใช้งาน</string>
+    <!-- translated 2026-06-01 -->
+    <string name="age_restriction_sub_eighteen_body">ข้อความส่วนตัวและกาชาให้บริการเฉพาะผู้ใช้ที่มีอายุ 18 ปีขึ้นไปเท่านั้น ตามวันเกิดในบัญชีของคุณ คุณยังไม่มีคุณสมบัติ หากคุณคิดว่านี่ไม่ถูกต้อง โปรดติดต่อฝ่ายสนับสนุน — เราไม่สามารถรับการส่งบัตรประจำตัวเพื่อเปลี่ยนวันเกิดที่บันทึกไว้ได้</string>
+    <!-- translated 2026-06-01 -->
+    <string name="age_restriction_sub_eighteen_confirm">ติดต่อฝ่ายสนับสนุน</string>
+    <!-- translated 2026-06-01 -->
+    <string name="age_restriction_dismiss">ยกเลิก</string>
+
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_submit_title">ยืนยันอายุของคุณ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_step_explanation_title">วิธีการทำงานนี้</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_step_explanation_body">เราต้องการรูปถ่ายบัตรประจำตัวที่ออกโดยหน่วยงานราชการเพื่อยืนยันว่าคุณมีอายุไม่ต่ำกว่า 18 ปี รูปภาพดังกล่าวได้รับการเข้ารหัสระหว่างการส่ง ตรวจสอบโดยผู้ตรวจสอบที่เป็นมนุษย์ และจะถูกลบอย่างถาวรทันทีที่มีการบันทึกการตัดสินใจ ซึ่งโดยปกติจะใช้เวลาภายใน 24 ชั่วโมง จะเก็บเฉพาะวันเกิดและผลการตรวจสอบเท่านั้น</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_step_explanation_continue">ฉันเข้าใจแล้ว - ดำเนินการต่อ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_step_method_title">เอกสารไหน?</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_step_method_body">เลือกประเภทบัตรประจำตัวที่คุณจะส่ง วันเกิดในเอกสารจะต้องตรงกับวันเกิดในบัญชีของคุณ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_method_passport">หนังสือเดินทาง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_method_drivers_license">ใบขับขี่</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_method_national_id">บัตรประจำตัวประชาชน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_step_image_title">เพิ่มรูปภาพ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_step_image_body">เลือกรูปถ่ายบัตรประจำตัวที่ชัดเจน ตรวจสอบให้แน่ใจว่าวันเกิดสามารถอ่านได้ครบถ้วน</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_step_image_pick">เลือกรูปภาพ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_step_image_replace">แทนที่รูปภาพ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_step_confirm_title">พร้อมส่งหรือยัง?</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_step_confirm_body">เมื่อส่งแล้วภาพถ่ายจะถูกส่งไปตรวจสอบ คุณจะได้รับข้อความระบบเมื่อมีการบันทึกการตัดสินใจ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_field_method">ประเภทบัตรประจำตัว:</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_field_photo">รูปถ่าย:</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_photo_attached">ที่แนบมา</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_step_confirm_submit">ส่งเพื่อตรวจสอบ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_step_submitted_title">ขอบคุณ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_step_submitted_body">การส่งของคุณอยู่ในคิว เราจะส่งข้อความถึงคุณที่นี่เมื่อมีการบันทึกการตัดสินใจ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_step_submitted_done">เสร็จแล้ว</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_back">กลับ</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_submit_error_no_method">โปรดเลือกประเภทรหัสก่อนส่ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_submit_error_no_image">กรุณาเพิ่มภาพถ่ายก่อนที่จะส่ง</string>
+    <!-- google-translated 2026-05-04 -->
+    <string name="age_verif_submit_error_generic">ไม่สามารถส่งได้ — โปรดตรวจสอบการเชื่อมต่อของคุณแล้วลองอีกครั้ง</string>
+    <!-- google-translated 2026-05-08 -->
+    <string name="age_verif_test_env_label">สภาพแวดล้อมการทดสอบ</string>
+    <!-- google-translated 2026-05-08 -->
+    <string name="age_verif_test_env_warning">อัปโหลดรูปภาพใดๆ — นี่เป็นสภาพแวดล้อมการทดสอบ ไม่จำเป็นต้องใช้ ID จริงและไม่ได้จัดเก็บไว้ในระยะยาว</string>
+    <!-- google-translated 2026-05-09 -->
+    <string name="success_report_resolved_with_issues">รายงานได้รับการแก้ไขแล้ว แต่การดำเนินการบางอย่างไม่เสร็จสมบูรณ์ ตรวจสอบแผงเว็บของผู้ดูแลระบบแล้วลองอีกครั้งตามความจำเป็น</string>
+    <!-- google-translated 2026-05-15 -->
+    <string name="age_seg_relationship_removed_pm">ลิงก์ติดตามของคุณที่มี %1$s ได้ถูกลบออกแล้ว โดยเป็นส่วนหนึ่งของการเปลี่ยนแปลงล่าสุดกับวิธีที่ ShyTalk จัดระเบียบบัญชี\n\nการดำเนินการนี้เกิดขึ้นโดยอัตโนมัติ มันไม่ได้สะท้อนถึงสิ่งใดๆ ของคุณฝ่ายใดฝ่ายหนึ่ง และไม่สามารถกู้คืนลิงก์ต้นฉบับจากที่นี่ได้\n\nหากคุณจำชื่อไม่ได้ ก็หมายความว่าการเชื่อมต่อในอดีตได้รับการแก้ไขแล้ว</string>
+    <!-- google-translated 2026-05-15 -->
+    <string name="age_seg_room_removed_pm">คุณถูกลบออกจาก %1$s เนื่องจากเป็นส่วนหนึ่งของการเปลี่ยนแปลงล่าสุดกับวิธีที่ ShyTalk จัดระเบียบบัญชี\n\nการดำเนินการนี้เกิดขึ้นโดยอัตโนมัติและจะไม่สะท้อนถึงสิ่งที่คุณทำ ตัวห้องเองนั้นดี เราไม่สามารถให้คุณอยู่ในห้องนั้นได้ภายใต้ข้อตกลงใหม่\n\nคุณยังคงสามารถสร้างหรือเข้าร่วมห้องอื่นได้ตามปกติ</string>
+    <!-- google-translated 2026-05-15 -->
+    <string name="age_seg_unavailable">ไม่พร้อมใช้งาน</string>
+    <!-- google-translated 2026-05-15 -->
+    <string name="age_seg_user_unavailable">ผู้ใช้รายนี้ไม่พร้อมใช้งาน</string>
+    <!-- google-translated 2026-05-15 -->
+    <string name="age_seg_room_unavailable">ห้องนี้ไม่ว่าง</string>
+    <!-- google-translated 2026-05-15 -->
+    <string name="age_seg_cross_cohort_blocked_toast">การดำเนินการนี้ไม่สามารถใช้ได้สำหรับบัญชีของคุณ</string>
+    <!-- google-translated 2026-05-15 -->
+    <string name="age_seg_thread_hidden_pm">เธรดของคุณที่มี %1$s ได้รับการเก็บรักษาไว้แต่ไม่สามารถดำเนินการต่อได้ ซึ่งเป็นส่วนหนึ่งของการเปลี่ยนแปลงล่าสุดกับวิธีที่ ShyTalk จัดระเบียบบัญชี\n\nการดำเนินการนี้เกิดขึ้นโดยอัตโนมัติ ไม่มีสิ่งใดที่คุณส่งไปก่อนหน้านี้จะสูญหาย ไม่สามารถแลกเปลี่ยนข้อความใหม่ในชุดข้อความนี้ แต่คุณยังสามารถเริ่มต้นการสนทนาใหม่ๆ กับผู้คนในแวดวงปกติของคุณได้</string>
+    <!-- google-translated 2026-05-15 -->
+    <string name="age_seg_group_frozen_banner">กลุ่มนี้ไม่ยอมรับสมาชิกใหม่หรือข้อความหลังจากการเปลี่ยนแปลงล่าสุดในวิธีที่ ShyTalk จัดระเบียบบัญชี</string>
+    <!-- google-translated 2026-05-15 -->
+    <string name="age_seg_age_up_welcome_pm">ยินดีต้อนรับ — บัญชีของคุณได้ย้ายเข้าสู่แวดวง ShyTalk ที่กว้างขึ้นแล้ว\n\nคุณจะเริ่มเห็นผู้คนมากขึ้นในการค้นพบและรายการนับจากนี้เป็นต้นไป การเชื่อมต่อก่อนหน้านี้ที่จัดระเบียบในขณะที่บัญชีของคุณอยู่ในวงกลมเล็ก ๆ จะไม่สามารถเรียกคืนได้โดยอัตโนมัติ แต่คุณสามารถเพิ่มใครก็ได้ที่คุณต้องการติดตามอีกครั้ง</string>
+    <!-- google-translated 2026-05-15 -->
+    <string name="age_seg_age_down_admin_pm">รายละเอียดบัญชีของคุณได้รับการอัปเดตโดยเจ้าหน้าที่ของ ShyTalk ด้วยเหตุนี้ ผู้คนและห้องที่คุณมองเห็นจึงถูกจำกัดให้เหลือวงกลมเล็กลง\n\nหากคุณคิดว่านี่เป็นข้อผิดพลาด โปรดติดต่อฝ่ายสนับสนุนแล้วเราจะตรวจสอบ</string>
+</resources>

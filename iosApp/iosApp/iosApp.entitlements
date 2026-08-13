@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	    aps-environment is set to `production` for both debug and release.
+	    Apple's signing infrastructure picks the actual APNs delivery
+	    environment from the embedded provisioning profile (sandbox for
+	    development profiles, production for distribution profiles), so
+	    `production` here is safe and avoids the silent-delivery-failure
+	    footgun where a `development` value would mismatch any non-debug
+	    local signing (e.g. Ad Hoc).
+
+	    SHARED FILE — DO NOT ADD SCHEME-SPECIFIC KEYS HERE. Both Debug and
+	    Release builds reference this single entitlements file (per
+	    project.pbxproj `CODE_SIGN_ENTITLEMENTS = iosApp/iosApp.entitlements`
+	    in both configurations). If you need a Debug-only or staging-only
+	    capability (associated-domains for a staging URL, etc.), split this
+	    into iosApp-Debug.entitlements / iosApp-Release.entitlements and
+	    reference per-configuration in project.pbxproj.
+	-->
+	<key>aps-environment</key>
+	<string>production</string>
+	<!--
+	    com.apple.developer.applesignin enables Sign In with Apple via
+	    ASAuthorizationController. Without this key, performRequests()
+	    returns immediately with an error and no token, so the Apple
+	    Sign-In sheet never finishes loading from the user's perspective —
+	    DEV TestFlight builds were affected by this exact regression.
+	    "Default" is the standard value for a first-party app — Apple's
+	    docs reserve other values for sibling-app scenarios that don't
+	    apply here.
+	-->
+	<key>com.apple.developer.applesignin</key>
+	<array>
+		<string>Default</string>
+	</array>
+</dict>
+</plist>

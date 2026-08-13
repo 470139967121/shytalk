@@ -1,0 +1,164 @@
+name: SonarCloud Analysis
+
+# Per-ref concurrency: newer commit on the same PR cancels in-progress
+# Sonar runs. See lint.yml for the full rationale + the propagation gap
+# in pr-checks.yml's concurrency. Pinned by
+# express-api/tests/scripts/reusable-workflow-concurrency.test.js.
+concurrency:
+  group: sonarcloud-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Git ref to check out'
+        type: string
+        required: true
+      app_changed:
+        description: 'Whether Kotlin/Android source changed'
+        type: boolean
+        default: true
+
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to analyse (default: main)'
+        type: string
+        default: 'main'
+      app_changed:
+        description: 'Include Kotlin/Android coverage'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  sonarcloud:
+    name: SonarCloud Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+
+      # Cache the SonarCloud scanner engine (SHY-0068). AWS WAF
+      # intermittently blocks runner IPs on the engine download (PR #1049,
+      # PR #1001) — cache the artefact instead of retrying the flake
+      # (replaces the deleted sonarcloud-auto-retry.yml per
+      # feedback-no-auto-retry-workflows). ~/.sonar/cache is internally
+      # versioned + additive, so the key is OS-scoped with a run-unique
+      # suffix: GitHub cache entries are immutable per key, so a constant
+      # key would never re-save; run-unique keys always save fresh while
+      # restore-keys restores the newest entry. Do NOT set SONAR_USER_HOME
+      # — CI and local pre-push scans must share this default path.
+      - name: Cache SonarCloud scanner engine
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-sonar
+
+      # `cache-hit` is 'true' only on EXACT key match — never with a
+      # run-unique key — so the operationally meaningful signal is whether
+      # the restore actually produced content (reviewer finding, SHY-0068).
+      - name: Engine cache status
+        run: |
+          if [ -d "$HOME/.sonar/cache" ] && [ -n "$(ls -A "$HOME/.sonar/cache" 2>/dev/null)" ]; then
+            echo "engine-cache: HIT (restored via prefix-match; engine download skipped)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "engine-cache: MISS (cold cache; engine will download and be saved)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: ./.github/actions/setup-jdk-gradle
+
+      - uses: ./.github/actions/setup-node
+
+      # EPIC-0003 / SHY-0120: the express cron Jest tests also exercise the
+      # REAL R2 (MinIO) + email (Mailpit) backends, so provision them here
+      # too (mirrors test-backend.yml + local/docker-compose). Started before
+      # the Firebase emulators so the image pulls overlap with emulator boot.
+      - uses: ./.github/actions/start-local-services
+
+      # EPIC-0003 Phase 3: run the express Jest suite against the REAL
+      # Firebase emulator stack ($0, credential-free under projectId
+      # demo-shytalk) instead of jest.mock(firebase). The JVM the
+      # Firestore/RTDB emulators need is already provided by
+      # setup-jdk-gradle above (no second JVM setup).
+      - uses: ./.github/actions/start-firebase-emulators
+
+      # Block until MinIO + Mailpit answer before running the suite — the
+      # cron tests hit both in beforeAll, so an unready container is a hard
+      # failure, not a flake.
+      - name: Wait for MinIO + Mailpit to be ready
+        shell: bash
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:9002/minio/health/live >/dev/null \
+               && curl -sf http://localhost:8025/api/v1/messages >/dev/null; then
+              echo "MinIO + Mailpit ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::MinIO/Mailpit did not become ready within 60s"
+          exit 1
+
+      - name: Run Express API tests with coverage
+        # `--experimental-vm-modules` lets Jest resolve dynamic `import()`
+        # callbacks (data-export-builder.js uses `import('archiver')` since
+        # archiver v8 is ESM-only). Mirrors the `test` script in
+        # express-api/package.json + test-backend.yml + .husky/pre-push.
+        #
+        # No `|| true` fallback — the step previously swallowed Jest
+        # failures and Sonar then uploaded partial coverage as if all
+        # tests passed. Per feedback-warnings-are-failures, a failing
+        # test must fail the gate. If this surfaces a real regression
+        # the right fix is to repair the test, not restore the bypass.
+        run: |
+          cd express-api && npm ci
+          node --experimental-vm-modules node_modules/.bin/jest --coverage --coverageReporters=lcov
+
+      - name: Download build outputs
+        if: inputs.app_changed
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: build-outputs
+        continue-on-error: true
+
+      - uses: ./.github/actions/decode-google-services
+        if: inputs.app_changed
+        with:
+          dev-base64: ${{ secrets.GOOGLE_SERVICES_DEV_BASE64 }}
+          prod-base64: ${{ secrets.GOOGLE_SERVICES_PROD_BASE64 }}
+
+      - name: Run Kotlin JVM tests (fallback if no build artifacts)
+        if: inputs.app_changed
+        run: |
+          if [ -d "shared/build/test-results" ]; then
+            echo "Build artifacts found — skipping rebuild"
+          else
+            echo "No build artifacts — running tests with coverage"
+            ./gradlew :shared:jvmTest testDevDebugUnitTest jacocoDevDebugUnitTestReport || true
+          fi
+
+      - name: Run SonarCloud analysis
+        if: env.SONAR_TOKEN != ''
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./gradlew sonar -Dsonar.token=$SONAR_TOKEN -x :app:sonar
+
+      - name: Skip SonarCloud (no token)
+        if: env.SONAR_TOKEN == ''
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: echo "::warning::SonarCloud skipped — SONAR_TOKEN unavailable (Dependabot PR on public repo)"

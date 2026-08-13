@@ -1,0 +1,33 @@
+{
+  "name": "shytalk",
+  "private": true,
+  "scripts": {
+    "test:web": "playwright test",
+    "test:integration": "playwright test --config=playwright.integration.config.ts",
+    "seed:dev": "node scripts/seed-dev-fixtures.mjs",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "express-api/**/*.js": [
+      "npx --prefix express-api eslint --max-warnings=0",
+      "npx --prefix express-api prettier --check"
+    ],
+    "*.feature": [
+      "bash .claude/hooks/check-gherkin.sh"
+    ],
+    "*.{kt,kts}": [
+      "ktlint --relative",
+      "bash .claude/hooks/check-kmp-compat.sh"
+    ]
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
+    "@playwright/test": "^1.61.0",
+    "allure-playwright": "^3.10.0",
+    "firebase": "^12.15.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.8",
+    "serve": "^14.2.4",
+    "sharp": "^0.35.2"
+  }
+}

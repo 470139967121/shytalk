@@ -1,0 +1,341 @@
+name: Android E2E Tests
+
+on:
+  workflow_call:
+    inputs:
+      android:
+        description: 'Android (all, none, or e.g. 28-phone,35-tablet)'
+        type: string
+        default: 'all'
+      parallel:
+        description: 'Run matrix jobs in parallel'
+        type: boolean
+        default: true
+      ref:
+        description: 'Git ref to test'
+        type: string
+        required: true
+      report_env:
+        description: 'Report environment: pr or deploy'
+        type: string
+        default: 'pr'
+
+  workflow_dispatch:
+    inputs:
+      android:
+        description: 'Android (all, none, or e.g. 28-phone,35-tablet)'
+        type: string
+        default: 'all'
+      parallel:
+        description: 'Run matrix jobs in parallel'
+        type: boolean
+        default: true
+      ref:
+        description: 'Git ref to test (default: main)'
+        type: string
+        default: 'main'
+      report_env:
+        description: 'Report environment: pr or deploy'
+        type: string
+        default: 'pr'
+
+permissions:
+  contents: write       # needed by allure-report.yml (gh-pages deploy)
+
+# Per-ref concurrency: each PR / branch has its own queue, so independent
+# PRs don't serialize through one global slot. cancel-in-progress: true so
+# a newer commit on the same PR supersedes the older one's in-progress run
+# -- pr-checks.yml's cancellation does NOT propagate into reusable
+# workflows, so this MUST be set locally. Emulator-resource contention
+# (the original rationale for the global group) only matters WITHIN a
+# single workflow run; GitHub-hosted runners are isolated VMs per-job, so
+# cross-PR contention isn't a real concern. Pinned by
+# express-api/tests/scripts/reusable-workflow-concurrency.test.js.
+concurrency:
+  group: e2e-tests-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # ── Resolve inputs into device matrix ────────────────────────
+  resolve-inputs:
+    name: Resolve Inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      run_android: ${{ steps.resolve.outputs.run_android }}
+      android_matrix: ${{ steps.resolve.outputs.android_matrix }}
+      parallel: ${{ steps.resolve.outputs.parallel }}
+      ref: ${{ steps.resolve.outputs.ref }}
+    steps:
+      - name: Resolve platforms, devices, and ref
+        id: resolve
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const ANDROID_ALL = [
+              { 'api-level': 28, 'form-factor': 'phone', profile: 'pixel_2' },
+              { 'api-level': 28, 'form-factor': 'tablet', profile: 'Nexus 10' },
+              { 'api-level': 30, 'form-factor': 'phone', profile: 'pixel_4' },
+              { 'api-level': 30, 'form-factor': 'tablet', profile: 'Nexus 10' },
+              { 'api-level': 33, 'form-factor': 'phone', profile: 'pixel_6' },
+              { 'api-level': 33, 'form-factor': 'tablet', profile: 'pixel_tablet' },
+              { 'api-level': 35, 'form-factor': 'phone', profile: 'pixel_9' },
+              { 'api-level': 35, 'form-factor': 'tablet', profile: 'pixel_tablet' },
+            ];
+
+            const android = '${{ inputs.android }}' || 'all';
+            const parallel = '${{ inputs.parallel }}' !== 'false';
+            const ref = '${{ inputs.ref }}' || context.sha;
+
+            function filter(input, catalog, keyFn) {
+              if (input === 'none' || input === 'false') return [];
+              if (input === 'all' || input === 'true') return catalog;
+              const selected = input.split(',').map(s => s.trim().toLowerCase());
+              return catalog.filter(item => selected.includes(keyFn(item)));
+            }
+
+            const androidMatrix = filter(android, ANDROID_ALL, d => `${d['api-level']}-${d['form-factor']}`);
+
+            core.setOutput('ref', ref);
+            core.setOutput('parallel', String(parallel));
+            core.setOutput('run_android', String(androidMatrix.length > 0));
+            core.setOutput('android_matrix', JSON.stringify({ include: androidMatrix }));
+
+            console.log(`Android: ${androidMatrix.length} devices`);
+
+  # ── Android E2E ───────────────────────────────────────────────
+  test-android:
+    name: "Android E2E (API ${{ matrix.api-level }}, ${{ matrix.form-factor }})"
+    needs: [resolve-inputs]
+    if: always() && needs.resolve-inputs.result == 'success' && needs.resolve-inputs.outputs.run_android == 'true'
+    # PINNED 2026-06-01 to ubuntu-22.04 from ubuntu-latest (currently
+    # resolves to ubuntu-24.04). Four consecutive Android-emulator boot
+    # failures on PRs #950, #953 traced to ubuntu-24.04 image release
+    # 20260525.161 — emulator process launches but `adb wait-for-device`
+    # never sees `sys.boot_completed` go true, even with the
+    # `emulator-boot-timeout: 1800` (30 min) raise applied (validated
+    # by log: timeout fired at 1874s, the full window). PR #952's heap +
+    # boot-timeout headroom addresses the budget axis but NOT this
+    # runner-image axis.
+    #
+    # Upstream tracker: ReactiveCircus/android-emulator-runner#400
+    # ("Error on Ubuntu-24.04" — action does not yet document 24.04 as
+    # supported). The action's own CI exercises ubuntu-22.04 explicitly
+    # at the older API rows; the 24.04 / ubuntu-latest coverage is at
+    # API 24, 34, 34-ext10, 35 — exercising mostly different AVD
+    # profiles than ShyTalk's pixel_6 matrix axis. 22.04 is therefore
+    # the empirically-stable target for THIS repo (API 28 / 30 / 33 /
+    # 35 on pixel profiles) per the 4 boot failures we hit on 24.04,
+    # not a blanket statement about every consumer of the action.
+    #
+    # Sister jobs `resolve-inputs` + `e2e-summary` do NOT run the emulator
+    # and remain on ubuntu-latest (asserted by sibling tests in
+    # android-e2e-emulator-boot-headroom.test.js).
+    #
+    # Revisit when the action ships a release that documents 24.04 as
+    # supported, OR when actions/runner-images publishes a 24.04 fix
+    # for the KVM / emulator boot path.
+    runs-on: ubuntu-22.04
+    # Bumped 2026-06-01 from 60 → 90 alongside the emulator-boot-timeout
+    # raise to 1800s. Boot/test split: worst-case 30 min boot + the
+    # `connectedLocalDebugAndroidTest` suite (currently ~25 min on the
+    # 2-core runner). 60 left ~30 min headroom; the boot raise consumed
+    # most of it. 90 restores a clear "boot burned its full ceiling AND
+    # tests still have a generous half-hour to finish" margin. Bump in
+    # tandem with `emulator-boot-timeout` if the suite grows further.
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ needs.resolve-inputs.outputs.parallel == 'true' && 99 || 1 }}
+      matrix: ${{ fromJSON(needs.resolve-inputs.outputs.android_matrix) }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.resolve-inputs.outputs.ref }}
+
+      - uses: ./.github/actions/setup-jdk-gradle
+
+      - uses: ./.github/actions/decode-google-services
+        with:
+          dev-base64: ${{ secrets.GOOGLE_SERVICES_DEV_BASE64 }}
+          include-local: 'true'
+
+      - uses: ./.github/actions/decode-keystore
+        with:
+          keystore-base64: ${{ secrets.KEYSTORE_BASE64 }}
+          # Dependabot PRs run with a read-only token and zero secret access,
+          # so KEYSTORE_BASE64 is empty. The localDebug variant we test uses
+          # Android's auto-generated debug keystore, not this one — but the
+          # action errors out when both secret and fallback are absent.
+          # Mirrors the same opt-in already present in pr-checks.yml.
+          fallback-debug: 'true'
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: ./.github/actions/start-local-services
+
+      - uses: ./.github/actions/start-firebase-emulators
+
+      - name: Seed local data
+        run: |
+          cd express-api && npm ci
+          NODE_PATH=./node_modules NODE_ENV=local node ../local/seed.js
+
+      - name: Start Express API
+        run: |
+          cd express-api
+          NODE_ENV=local node src/index.js &
+          until curl -s http://localhost:3000/api/health > /dev/null 2>&1; do sleep 1; done
+          echo "API ready"
+
+      - name: Run E2E tests on emulator
+        uses: reactivecircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a # v2.37.0
+        env:
+          LIVEKIT_URL: ws://10.0.2.2:7880
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: google_apis
+          arch: x86_64
+          profile: ${{ matrix.profile }}
+          force-avd-creation: true
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          disable-animations: true
+          # Self-discovered 2026-06-01 on PR #950: the emulator boot hit the
+          # default 600s timeout exactly (started 15:02:25, "Timeout waiting
+          # for emulator to boot" fired at 15:12:28) on a runner that ran the
+          # SAME workflow with the SAME ubuntu-24.04 image successfully ~2h
+          # earlier. Without explicit headroom, the default 600s leaves zero
+          # margin for the natural variance in emulator-boot duration on
+          # 2-core GHA runners (cold sdkmanager install + AVD create + first
+          # boot routinely takes 8-9 min of the 10 budget). Raising to 1800s
+          # gives 3× headroom; the action exits cleanly on real failure
+          # signals (process died, kvm unavailable) without waiting the full
+          # window, so the extra ceiling only costs time when boot is
+          # genuinely slow rather than broken.
+          emulator-boot-timeout: 1800
+          # Default heap is the AVD profile default (2048M for pixel_6, 1024M
+          # for older pixel_2). API 33 + google_apis system services peak
+          # well past 2GB during early boot; OOM-kill of zygote produces the
+          # silent-boot-failure signature observed here. 4096 is the
+          # action-author's documented recommendation for stable API 30+
+          # boots on GHA-hosted runners.
+          heap-size: 4096
+          # The android-emulator-runner action executes `script` via /usr/bin/sh
+          # (dash on Ubuntu runners), which does NOT support `set -o pipefail`.
+          # Wrap the command in `bash -c` so pipefail propagates the gradlew
+          # exit code through the tee pipe — without it, tee always returns 0
+          # and a failing test run silently passes.
+          # NOTE: the inner script uses SINGLE QUOTES, so `$VAR` references
+          # inside are LITERAL. If a future contributor needs shell expansion
+          # for an env var, either escape the dollar (`$$VAR` won't work — use
+          # `'"$VAR"'` to break out of single quotes) or switch to a heredoc.
+          script: |
+            bash -c 'set -o pipefail; ./gradlew connectedLocalDebugAndroidTest --no-parallel 2>&1 | tee test-output.log'
+
+      - name: Cleanup Docker containers
+        if: always()
+        run: |
+          docker logs livekit 2>/dev/null || true
+          docker logs minio 2>/dev/null || true
+          docker logs mailpit 2>/dev/null || true
+          docker rm -f livekit minio mailpit 2>/dev/null || true
+
+      - name: Collect Allure results from JUnit XML
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p allure-results-android
+          PACKAGE="com.shyden.shytalk.local"
+          # Don't suppress stderr — we need it when the pull fails. Use
+          # explicit if so the failure path can warn loudly rather than
+          # quietly proceeding to a useless JUnit fallback.
+          # `cd files/allure-results &&` short-circuits if the dir is
+          # missing. If cd succeeds but dir is empty, `tar cf - .` still
+          # exits 0 — the NATIVE_COUNT log below catches that case, so the
+          # success line here intentionally defers to the count check.
+          if adb exec-out run-as "$PACKAGE" sh -c 'cd files/allure-results && tar cf - .' \
+             | tar xf - -C allure-results-android/; then
+            echo "Allure pull command succeeded (file count below)"
+          else
+            echo "::warning::Failed to pull Allure results from device — package=$PACKAGE may not exist or files/allure-results was missing"
+          fi
+          NATIVE_COUNT=$(find allure-results-android -name "*-result.json" | wc -l | tr -d ' ')
+          echo "Native Allure results: $NATIVE_COUNT files"
+          if [ "${NATIVE_COUNT:-0}" -eq 0 ]; then
+            echo "::warning::No native Allure results — falling back to JUnit XML"
+            if [ -d app/build/outputs/androidTest-results ]; then
+              find app/build/outputs/androidTest-results -name "TEST-*.xml" \
+                -exec cp {} allure-results-android/ \;
+            else
+              echo "::error::No JUnit results either — test execution likely failed before any results were written"
+              exit 1
+            fi
+          fi
+
+      - name: Write Android environment.properties
+        if: always()
+        run: |
+          sed 's/^ *//' > allure-results-android/environment.properties <<'ENVEOF'
+          platform=Android
+          api_level=${{ matrix.api-level }}
+          device=${{ matrix.profile }}
+          environment=local
+          ENVEOF
+
+      - name: Upload Allure results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: allure-results-android-api${{ matrix.api-level }}-${{ matrix.form-factor }}
+          path: allure-results-android/
+          retention-days: 14
+
+      - name: Upload test output
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: android-test-output-api${{ matrix.api-level }}-${{ matrix.form-factor }}
+          path: |
+            test-output.log
+            app/build/reports/androidTests/connected/
+          retention-days: 14
+
+  # ── Summary ──────────────────────────────────────────────────
+  e2e-summary:
+    name: Android E2E Summary
+    needs: [resolve-inputs, test-android]
+    if: always() && needs.resolve-inputs.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check results
+        run: |
+          echo "## Android E2E Test Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          ANDROID="${{ needs.test-android.result }}"
+
+          echo "- Android E2E: $ANDROID" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$ANDROID" != "success" ] && [ "$ANDROID" != "skipped" ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "**Android E2E tests failed.**" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+  # ── Generate Allure Report ────────────────────────────────────
+  allure-report:
+    needs: [resolve-inputs, test-android]
+    if: always() && needs.resolve-inputs.result == 'success'
+    uses: ./.github/workflows/allure-report.yml
+    with:
+      suite_name: android-e2e
+      report_env: ${{ inputs.report_env || 'pr' }}
+      artifact_pattern: allure-results-*

@@ -1,0 +1,978 @@
+name: Deploy To Dev
+# Deploy to dev environment and distribute to testers
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag, or commit SHA to deploy. Leave blank to use the ref selected in the run-workflow dropdown above (which only lists branches and tags — use this field for commit SHAs)."
+        required: false
+        type: string
+        default: ""
+      backend:
+        description: "Deploy Express API to dev"
+        type: boolean
+        default: true
+      web:
+        description: "Deploy web to dev"
+        type: boolean
+        default: true
+      android-testers:
+        description: "Distribute APK to testers"
+        type: boolean
+        default: true
+      ios-testers:
+        description: "Distribute iOS to TestFlight"
+        type: boolean
+        default: true
+      playwright:
+        description: "Run sanity checks after deploy (pages load, API responds)"
+        type: boolean
+        default: true
+      seed-personas:
+        description: "Re-seed dev test personas (P-02..P-19). Idempotent: refreshes seeded users only — never touches manually-created users."
+        type: boolean
+        default: true
+      release-notes:
+        description: "Firebase App Distribution release notes (what to test)"
+        type: string
+        default: ""
+
+permissions:
+  contents: write # needed by playwright-tests.yml allure-report (gh-pages deploy)
+  actions: read
+
+# Dev deploys must serialize. Parallel dev deploys can race on the
+# London Express VM (scp tarball + pm2 restart), on Firebase App
+# Distribution upload slots, and on TestFlight build-number
+# assignment. cancel-in-progress: false makes queued deploys wait
+# for the running one to complete rather than preempting it — a
+# partial rollback halfway through a multi-step deploy leaves the
+# env in an undefined state. Mirrors deploy-prod.yml's matching
+# block. Pinned by tests/scripts/deploy-dev-concurrency.test.js.
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  deploy-backend-dev:
+    name: Deploy Backend to Dev
+    if: inputs.backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Honour the optional `ref` input so the operator can deploy a
+          # specific branch, tag (e.g. `v0.97.1`), or commit SHA. Falls
+          # back to the workflow_dispatch ref dropdown when unset (which
+          # supports branches and tags but not commits — hence the
+          # explicit input).
+          ref: ${{ inputs.ref || github.ref }}
+          # `actions/checkout` defaults to fetch-depth: 1 which only
+          # includes the tip of the named ref. A commit-SHA `inputs.ref`
+          # may NOT be at the tip of any branch/tag, in which case
+          # checkout fails with `fatal: reference is not a tree`. Pull
+          # full history when the operator overrides ref so any SHA is
+          # reachable; keep depth 1 for default-ref runs to save time.
+          # IMPORTANT: use string literals '0'/'1' here. GitHub Actions
+          # expression `cond && 0 || 1` evaluates to `1` even when cond
+          # is true because numeric 0 is falsy (JS-style coercion), so
+          # the `|| 1` short-circuit fires. Strings "0"/"1" are both
+          # truthy, so `cond && '0' || '1'` correctly returns '0' when
+          # cond is true. `actions/checkout` parses the input as int.
+          fetch-depth: ${{ inputs.ref != '' && '0' || '1' }}
+
+      - name: Resolve deployed SHA
+        id: deployed-sha
+        # `github.sha` is fixed at workflow-trigger time against the
+        # dropdown ref, so it doesn't reflect the override `inputs.ref`
+        # we just checked out. Re-resolve from the working tree so the
+        # SHA we record matches the code actually shipped.
+        run: |
+          set -euo pipefail
+          SHA=$(git rev-parse HEAD)
+          REF_LABEL='${{ inputs.ref != '' && inputs.ref || github.ref_name }}'
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Deploying ref=$REF_LABEL → sha=$SHA"
+
+      - uses: ./.github/actions/setup-node
+
+      - name: Install deploy tools
+        run: npm install -g firebase-tools
+
+      - name: Deploy Express API to London (dev)
+        env:
+          SSH_KEY: ${{ secrets.LONDON_SSH_KEY }}
+          DEPLOYED_SHA: ${{ steps.deployed-sha.outputs.sha }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan 145.241.224.13 >> ~/.ssh/known_hosts
+
+          cd express-api
+          tar czf /tmp/api.tar.gz --exclude='node_modules' --exclude='.env' .
+          scp /tmp/api.tar.gz ubuntu@145.241.224.13:/tmp/
+          # DEPLOYED_SHA written to .deployed-sha file (durable across pm2
+          # daemon restarts) AND set inline before pm2 restart --update-env
+          # (so the new process picks it up immediately). The /api/health
+          # endpoint reads it back so the deploy verification can assert
+          # the new code is actually serving (vs. stale pm2 process from
+          # a prior tarball that didn't trigger restart correctly).
+          #
+          # Build the remote-side deploy script LOCALLY (with the SHA
+          # baked in), then scp + exec. Splits the local-expansion from
+          # the ssh invocation so neither shellcheck SC2029 (client-side
+          # ssh-string expansion) nor SC2087 (heredoc expansion locale)
+          # fires — the local heredoc is the only place expansion
+          # happens, and that's exactly what local heredocs are for.
+          cat > /tmp/deploy-remote.sh <<EOF
+          set -e
+          cd ~/express-api && tar xzf /tmp/api.tar.gz
+          echo '${DEPLOYED_SHA}' > .deployed-sha
+          npm install --omit=dev
+          DEPLOYED_SHA='${DEPLOYED_SHA}' pm2 restart shytalk-api --update-env
+          EOF
+          scp /tmp/deploy-remote.sh ubuntu@145.241.224.13:/tmp/
+          ssh ubuntu@145.241.224.13 'bash /tmp/deploy-remote.sh'
+
+      - name: Verify dev API health
+        env:
+          EXPECTED_SHA: ${{ steps.deployed-sha.outputs.sha }}
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5; do
+            sleep 5
+            body=$(curl -sf -m 10 https://dev-api.shytalk.shyden.co.uk/api/health || echo "")
+            if [ -z "$body" ]; then
+              echo "Health check attempt $i: curl failed, retrying..."
+              continue
+            fi
+            echo "$body"
+            # Assert the deployed SHA is now serving — closes the
+            # "deploy succeeded but old pm2 process still running" silent-
+            # failure class. The tarball was extracted but if pm2 didn't
+            # actually restart (or restarted but the env didn't take), the
+            # old code is still serving and the SHA stays stale.
+            if echo "$body" | grep -q "\"sha\":\"$EXPECTED_SHA\""; then
+              echo "Health check passed — deployed SHA $EXPECTED_SHA is serving"
+              exit 0
+            fi
+            echo "Health check attempt $i: SHA mismatch (expected $EXPECTED_SHA), retrying..."
+          done
+          echo "::error::Dev API health check failed after 5 attempts — deployed code may not be running"
+          exit 1
+
+      - uses: ./.github/actions/deploy-firebase-rules
+        with:
+          service-account-json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DEV }}
+          firebase-project: shytalk-dev
+
+  # Refresh the seeded test personas (P-02..P-19) on every dev deploy.
+  # Factored into a SEPARATE reusable workflow (`seed-dev-personas.yml`)
+  # so it can ALSO be invoked directly via `gh workflow run
+  # seed-dev-personas.yml` to refresh persona state between journey-test
+  # runs WITHOUT a full deploy cycle (~30-60min). Per operator directive
+  # 2026-05-29.
+  #
+  # Opt-out via workflow_dispatch input `seed-personas=false`.
+  seed-dev-personas:
+    name: Seed Dev Personas
+    needs: deploy-backend-dev
+    if: needs.deploy-backend-dev.result == 'success' && inputs.seed-personas != false
+    uses: ./.github/workflows/seed-dev-personas.yml
+    secrets: inherit
+
+  deploy-web-dev:
+    name: Deploy Web to Dev
+    # Web depends on the dev API to function (firebase-config, /api/health,
+    # admin panel API calls). Shipping the web bundle when the backend
+    # deploy crashed leaves testers staring at a working-looking site
+    # whose every interaction errors. Discovered 2026-05-03 (run
+    # 25276782190): web deployed with the new auth lockdown but
+    # backend deploy failed in the same run, so dev was simultaneously
+    # locked down AND functionally broken. Gating prevents that drift.
+    needs: deploy-backend-dev
+    # Allow `success` OR `skipped` — `skipped` covers the legitimate
+    # `inputs.backend=false` case where the operator deliberately runs
+    # web-only / mobile-only. Block only on `failure` / `cancelled` so
+    # a crashed backend deploy can't ship a working-looking client.
+    #
+    # `always()` is required: GitHub Actions's implicit "needs success"
+    # gate skips dependent jobs whenever ANY upstream is non-success
+    # (including `skipped`). The implicit gate fires BEFORE the explicit
+    # `if:` evaluates, so a custom condition checking
+    # `result == 'skipped'` is silently ignored. `always()` opts out of
+    # the implicit gate and lets the explicit comparisons run. Discovered
+    # 2026-05-03 in run 25280868804 (web=true backend=false → web
+    # silently skipped).
+    # Allowlist (not denylist) so a typo'd `needs:` reference — which
+    # would make `result` evaluate to empty/null — fails closed instead
+    # of running with no gate. Defence in depth on top of `always()`.
+    if: |
+      always() &&
+      inputs.web &&
+      (needs.deploy-backend-dev.result == 'success' || needs.deploy-backend-dev.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Honour the optional `ref` input so the operator can deploy a
+          # specific branch, tag (e.g. `v0.97.1`), or commit SHA. Falls
+          # back to the workflow_dispatch ref dropdown when unset (which
+          # supports branches and tags but not commits — hence the
+          # explicit input).
+          ref: ${{ inputs.ref || github.ref }}
+          # `actions/checkout` defaults to fetch-depth: 1 which only
+          # includes the tip of the named ref. A commit-SHA `inputs.ref`
+          # may NOT be at the tip of any branch/tag, in which case
+          # checkout fails with `fatal: reference is not a tree`. Pull
+          # full history when the operator overrides ref so any SHA is
+          # reachable; keep depth 1 for default-ref runs to save time.
+          # IMPORTANT: use string literals '0'/'1' here. GitHub Actions
+          # expression `cond && 0 || 1` evaluates to `1` even when cond
+          # is true because numeric 0 is falsy (JS-style coercion), so
+          # the `|| 1` short-circuit fires. Strings "0"/"1" are both
+          # truthy, so `cond && '0' || '1'` correctly returns '0' when
+          # cond is true. `actions/checkout` parses the input as int.
+          fetch-depth: ${{ inputs.ref != '' && '0' || '1' }}
+
+      - uses: ./.github/actions/setup-node
+
+      - name: Install deploy tools
+        run: npm install -g wrangler
+
+      - name: Deploy web to dev site
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: "9315582c39b627dca58dfa83602db385"
+          DEV_FIREBASE_API_KEY: ${{ secrets.DEV_FIREBASE_API_KEY }}
+        run: |
+          sed "s|<DEV_FIREBASE_API_KEY>|$DEV_FIREBASE_API_KEY|" public/admin/config.dev.example.js > public/admin/config.js
+          sed "s|<DEV_FIREBASE_API_KEY>|$DEV_FIREBASE_API_KEY|" public/portal/config.dev.example.js > public/portal/config.js
+          sed "s|<DEV_FIREBASE_API_KEY>|$DEV_FIREBASE_API_KEY|" public/js/roadmap-config.dev.example.js > public/js/roadmap-config.js
+          wrangler pages deploy public --project-name shytalk-site-dev --branch main
+
+  distribute-android:
+    name: Distribute Android to Testers
+    # Same gating rationale as deploy-web-dev — Android dev builds
+    # talk to dev-api and break if the backend deploy didn't succeed.
+    # Pushing a build to internal testers that's guaranteed to error
+    # on the first sign-in attempt wastes their day.
+    needs: deploy-backend-dev
+    # See deploy-web-dev for `success || skipped` rationale (preserves
+    # `inputs.backend=false` Android-only hotfix path).
+    # See deploy-web-dev `always()` + allowlist rationale (run 25280868804).
+    if: |
+      always() &&
+      inputs.android-testers &&
+      (needs.deploy-backend-dev.result == 'success' || needs.deploy-backend-dev.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Honour the optional `ref` input so the operator can deploy a
+          # specific branch, tag (e.g. `v0.97.1`), or commit SHA. Falls
+          # back to the workflow_dispatch ref dropdown when unset (which
+          # supports branches and tags but not commits — hence the
+          # explicit input).
+          ref: ${{ inputs.ref || github.ref }}
+          # `actions/checkout` defaults to fetch-depth: 1 which only
+          # includes the tip of the named ref. A commit-SHA `inputs.ref`
+          # may NOT be at the tip of any branch/tag, in which case
+          # checkout fails with `fatal: reference is not a tree`. Pull
+          # full history when the operator overrides ref so any SHA is
+          # reachable; keep depth 1 for default-ref runs to save time.
+          # IMPORTANT: use string literals '0'/'1' here. GitHub Actions
+          # expression `cond && 0 || 1` evaluates to `1` even when cond
+          # is true because numeric 0 is falsy (JS-style coercion), so
+          # the `|| 1` short-circuit fires. Strings "0"/"1" are both
+          # truthy, so `cond && '0' || '1'` correctly returns '0' when
+          # cond is true. `actions/checkout` parses the input as int.
+          fetch-depth: ${{ inputs.ref != '' && '0' || '1' }}
+
+      - name: Resolve deployed SHA
+        id: deployed-sha
+        # See deploy-backend-dev/Resolve deployed SHA for full rationale —
+        # we re-resolve from the working tree because `github.sha` is
+        # fixed against the dropdown ref and ignores `inputs.ref`.
+        run: |
+          set -euo pipefail
+          SHA=$(git rev-parse HEAD)
+          REF_LABEL='${{ inputs.ref != '' && inputs.ref || github.ref_name }}'
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Distributing ref=$REF_LABEL → sha=$SHA"
+
+      - name: Try download cached APK
+        id: cached-apk
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REF=$(git rev-parse HEAD)
+          REPO="${{ github.repository }}"
+          RUN_ID=$(gh api "repos/${REPO}/actions/workflows/pr-checks.yml/runs?head_sha=${REF}&status=success&per_page=5" \
+            --jq '.workflow_runs[0].id // empty' 2>/dev/null || echo "")
+          if [ -n "$RUN_ID" ]; then
+            echo "Found pr-checks run: $RUN_ID"
+            echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No cached APK found — will build from scratch"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download cached APK
+        if: steps.cached-apk.outputs.found == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: dev-release-apk
+          path: dev-release-apk
+          run-id: ${{ steps.cached-apk.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+        id: download-apk
+
+      - uses: ./.github/actions/setup-jdk-gradle
+        if: steps.cached-apk.outputs.found != 'true' || steps.download-apk.outcome == 'failure'
+
+      - uses: ./.github/actions/decode-google-services
+        if: steps.cached-apk.outputs.found != 'true' || steps.download-apk.outcome == 'failure'
+        with:
+          dev-base64: ${{ secrets.GOOGLE_SERVICES_DEV_BASE64 }}
+
+      - uses: ./.github/actions/decode-keystore
+        if: steps.cached-apk.outputs.found != 'true' || steps.download-apk.outcome == 'failure'
+        with:
+          keystore-base64: ${{ secrets.KEYSTORE_BASE64 }}
+
+      - name: Build devRelease APK
+        if: steps.cached-apk.outputs.found != 'true' || steps.download-apk.outcome == 'failure'
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          LIVEKIT_URL: ${{ secrets.LIVEKIT_URL }}
+          # See pr-checks.yml's matching env for rationale. The persona
+          # picker on dev variant only appears when this is non-empty.
+          DEV_QA_PERSONAS_PASSWORD: ${{ secrets.DEV_QA_PERSONAS_PASSWORD }}
+        run: |
+          ./gradlew assembleDevRelease
+          mkdir -p dev-release-apk
+          cp app/build/outputs/apk/dev/release/*.apk dev-release-apk/
+
+      - name: Locate APK
+        id: find-apk
+        run: |
+          set -euo pipefail
+          # Glob with explicit count check rather than `find | head -1`. Two
+          # APKs can land in dev-release-apk/ if signing config changes
+          # produce both `app-dev-release.apk` and
+          # `app-dev-release-unsigned.apk`; alphabetical pick would silently
+          # upload the unsigned one to Firebase App Distribution.
+          shopt -s nullglob
+          apks=(dev-release-apk/*.apk)
+          shopt -u nullglob
+          if [ "${#apks[@]}" -eq 0 ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "::error::No APK found in dev-release-apk/"
+            exit 1
+          fi
+          if [ "${#apks[@]}" -gt 1 ]; then
+            echo "::error::Expected exactly one APK, found ${#apks[@]}: ${apks[*]}"
+            exit 1
+          fi
+          echo "found=true" >> "$GITHUB_OUTPUT"
+          echo "apk_path=${apks[0]}" >> "$GITHUB_OUTPUT"
+          echo "Found APK: ${apks[0]}"
+
+      - name: Upload to Firebase App Distribution
+        if: steps.find-apk.outputs.found == 'true'
+        uses: wzieba/Firebase-Distribution-Github-Action@bd494989dd4bec0343f78adee87fe66e48279ad6 # v1
+        with:
+          appId: "1:881846974606:android:fdcefe4da94d82718e31df"
+          serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DEV }}
+          groups: internal-testers
+          file: ${{ steps.find-apk.outputs.apk_path }}
+          releaseNotes: ${{ inputs.release-notes != '' && inputs.release-notes || format('Dev build from {0} ({1})', (inputs.ref != '' && inputs.ref || github.ref_name), steps.deployed-sha.outputs.sha) }}
+
+  distribute-ios:
+    name: Distribute iOS to TestFlight
+    # Same gating rationale as deploy-web-dev / distribute-android —
+    # iOS TestFlight builds talk to dev-api and break if the backend
+    # deploy didn't succeed. TestFlight build numbers are also a finite
+    # resource (Apple-rate-limited per session); skipping a doomed
+    # build saves a slot and keeps testers on the last known-good IPA.
+    needs: deploy-backend-dev
+    # See deploy-web-dev for `success || skipped` rationale (preserves
+    # `inputs.backend=false` iOS-only hotfix path).
+    # See deploy-web-dev `always()` + allowlist rationale (run 25280868804).
+    if: |
+      always() &&
+      inputs.ios-testers &&
+      (needs.deploy-backend-dev.result == 'success' || needs.deploy-backend-dev.result == 'skipped')
+    # Migrated 2026-05-20 from self-hosted Mac (shytalk-mac) to GitHub-hosted
+    # macos-latest per the no-self-hosted-runners policy. The self-hosted Mac
+    # was crashing under combined xcodebuild + K/Native memory pressure on
+    # an 8GB machine. macos-latest (14GB RAM, 3 cores) absorbs the load
+    # without taking down a developer laptop.
+    runs-on: macos-latest
+    # Tuned 2026-05-21: was 90 (too tight) -> 150 (revealed real hang at
+    # 1h52m of zero log output) -> 100. The earlier "needs more time"
+    # framing was wrong; the actual problem was a gradle daemon collision
+    # inside xcodebuild's `Compile Kotlin Framework` build phase, fixed
+    # by the explicit `gradle --stop` step below. With that fix + a
+    # step-level timeout on the Build/archive step (the only known hang
+    # site), the outer job envelope can stay tight at 100 min. Normal
+    # case is ~60-80 min on cold-cache macos-latest. 100 is the safety
+    # net for anything unexpected before the step timeouts fire.
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Honour the optional `ref` input so the operator can deploy a
+          # specific branch, tag (e.g. `v0.97.1`), or commit SHA. Falls
+          # back to the workflow_dispatch ref dropdown when unset (which
+          # supports branches and tags but not commits — hence the
+          # explicit input).
+          ref: ${{ inputs.ref || github.ref }}
+          # `actions/checkout` defaults to fetch-depth: 1 which only
+          # includes the tip of the named ref. A commit-SHA `inputs.ref`
+          # may NOT be at the tip of any branch/tag, in which case
+          # checkout fails with `fatal: reference is not a tree`. Pull
+          # full history when the operator overrides ref so any SHA is
+          # reachable; keep depth 1 for default-ref runs to save time.
+          # IMPORTANT: use string literals '0'/'1' here. GitHub Actions
+          # expression `cond && 0 || 1` evaluates to `1` even when cond
+          # is true because numeric 0 is falsy (JS-style coercion), so
+          # the `|| 1` short-circuit fires. Strings "0"/"1" are both
+          # truthy, so `cond && '0' || '1'` correctly returns '0' when
+          # cond is true. `actions/checkout` parses the input as int.
+          fetch-depth: ${{ inputs.ref != '' && '0' || '1' }}
+
+      # Pre-cleanup: scrub any signing material left behind by a PRIOR
+      # crashed run. `if: always()` cleanup at job end doesn't run if the
+      # runner is force-killed (SIGKILL, machine reboot, network partition
+      # past cancel timeout). On the persistent self-hosted Mac, leftover
+      # .p8/.p12/profile from such a crash sits on disk indefinitely. Run
+      # the cleanup composite action FIRST so the new run starts from a
+      # clean slate. Idempotent: silently no-ops when nothing's there.
+      - name: Pre-cleanup leftovers from prior crashed runs
+        uses: ./.github/actions/cleanup-ios-signing
+        with:
+          app-store-connect-key-id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+
+      # Fast pre-flight: assert the export plist hasn't been flipped back to
+      # `destination: upload` (which would upload silently and break TestFlight,
+      # as happened 2026-03-12 → 2026-04-29). Fails in <1s before we burn 20 min
+      # on archive + export.
+      - name: Assert ExportOptions.plist requires local export
+        run: |
+          set -euo pipefail
+          dest=$(/usr/libexec/PlistBuddy -c "Print :destination" iosApp/ExportOptions.plist)
+          if [ "$dest" != "export" ]; then
+            echo "::error::iosApp/ExportOptions.plist destination must be 'export' (got '$dest'). 'upload' uploads silently during exportArchive and writes no local IPA, breaking the next step."
+            exit 1
+          fi
+
+      - uses: ./.github/actions/setup-jdk-gradle
+
+      - uses: ./.github/actions/setup-ios-signing
+        with:
+          certificate-base64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          certificate-password: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          provision-profile-base64: ${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}
+          app-store-connect-key: ${{ secrets.APP_STORE_CONNECT_KEY }}
+          app-store-connect-key-id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+
+      - uses: ./.github/actions/decode-google-services
+        with:
+          dev-base64: ${{ secrets.GOOGLE_SERVICES_DEV_BASE64 }}
+
+      # Cache Kotlin/Native compiler distribution + platform libs (~/.konan).
+      # actions/setup-gradle (used via setup-jdk-gradle composite) caches
+      # ~/.gradle/caches but NOT ~/.konan, so the K/N compiler and its
+      # platform libs (clang, libffi, kotlin-native-prebuilt-*) are
+      # downloaded fresh on every cold runner — ~500MB-1GB of cold-cache
+      # tax per run. Cache-key is anchored on the Kotlin version in
+      # libs.versions.toml so a kotlin-version bump correctly invalidates.
+      # restore-keys allows partial-match restore on minor differences
+      # so we usually get a warm konan even when the exact key misses.
+      #
+      # Split into restore (here) + save (at the END of the job, after
+      # the heavy build steps) instead of the combined `actions/cache`
+      # step. Mirrors the fix landed in ios-tests.yml via PR #951 (and
+      # pinned by ios-konan-cache-no-hang.test.js): the combined step's
+      # synthetic POST upload of multi-GB ~/.konan can hang past the
+      # job-level timeout-minutes, stranding the workflow. The split
+      # makes save a regular step where timeout-minutes +
+      # continue-on-error apply.
+      - name: Restore Kotlin/Native cache (~/.konan)
+        id: konan-cache-restore
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: |
+            konan-${{ runner.os }}-
+
+      - name: Cache KMP shared framework
+        id: kmp-cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: shared/build/bin/iosArm64/releaseFramework
+          key: kmp-ios-framework-${{ hashFiles('shared/src/**', 'shared/build.gradle.kts') }}
+
+      - name: Build KMP shared framework for iOS
+        if: steps.kmp-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          # --max-workers=1: K/N link tasks can deadlock when run in
+          # parallel (xcodebuild's nested gradle call hung 39+ min before
+          # this flag was added). Serializing all gradle tasks is the
+          # safe baseline; on a 14GB macos-latest runner with multiple
+          # parallel K/N processes potentially needing ~3-5GB each plus
+          # competing for the konan compiler cache, parallelism is a
+          # net-negative anyway.
+          ./gradlew :shared:linkReleaseFrameworkIosArm64 :shared:linkDebugFrameworkIosArm64 --max-workers=1
+
+      - name: Cache Xcode derived data
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: xcode-derived-${{ hashFiles('iosApp/**', 'shared/build/bin/iosArm64/releaseFramework/**') }}
+          restore-keys: xcode-derived-
+
+      # 3 cache steps mirrored from ios-tests.yml with byte-identical
+      # keys (2026-05-25 — follow-up to PR #838's APP_CHANGED split).
+      # These caches are populated on every push to main (deploy-dev
+      # runs on every main commit) and restored by PR-branch CI
+      # (ios-tests.yml) via GitHub Actions' default-branch fallback
+      # rule. Without this alignment, PR-branch iOS Build hits cold
+      # caches even though main has been building iOS continuously.
+      #
+      # CAN'T be shared with PR branches: DerivedData (different
+      # target SDK: deploy-dev is iphoneos device, ios-tests.yml is
+      # iOS Simulator) and KMP framework (same reason, different
+      # arm64 variant). Those caches stay separate, scoped per
+      # workflow.
+      - name: Cache CocoaPods spec repos (~/.cocoapods/repos)
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.cocoapods/repos
+          key: cocoapods-repos-${{ runner.os }}-${{ hashFiles('iosApp/Podfile.lock') }}
+          restore-keys: |
+            cocoapods-repos-${{ runner.os }}-
+
+      - name: Cache iosApp/Pods
+        id: pods-cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: iosApp/Pods
+          key: pods-${{ runner.os }}-${{ hashFiles('iosApp/Podfile.lock') }}
+          restore-keys: |
+            pods-${{ runner.os }}-
+
+      - name: Cache SwiftPM packages (build/ios-spm-packages)
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: build/ios-spm-packages
+          key: ios-spm-${{ runner.os }}-${{ hashFiles('iosApp/**/Package.resolved', 'iosApp/**/Package.swift') }}
+          restore-keys: |
+            ios-spm-${{ runner.os }}-
+
+      - name: Install CocoaPods
+        # Skip when iosApp/Pods/ cache hit AND Podfile.lock unchanged —
+        # pods are already installed. On miss (or new Podfile.lock),
+        # runs fresh `pod install --deployment` which fails loud on
+        # lock mismatch instead of silently regenerating (catches
+        # stale-lock bugs before they corrupt the cached Pods).
+        if: steps.pods-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          cd iosApp
+          pod install --deployment
+
+      # Stop any gradle daemon left running by "Build KMP shared framework for
+      # iOS" before xcodebuild starts. xcodebuild's `Compile Kotlin Framework`
+      # build phase runs `./gradlew :shared:embedAndSignAppleFrameworkForXcode`
+      # from inside a constrained Xcode env (modified TMPDIR, sandboxed PATH);
+      # the new gradle CLI tries to connect to the still-alive daemon from the
+      # earlier explicit gradle step and hangs forever. Forensic evidence
+      # (run 26196249351, job 77076256845): 2 `java` orphan processes at
+      # timeout — the old daemon and the new client both alive after 1h52m
+      # of no log output. Stopping the daemon makes the nested call spawn
+      # fresh and avoid the collision.
+      - name: Stop gradle daemon before xcodebuild
+        run: ./gradlew --stop
+
+      # Step-level hang detector: the xcodebuild archive (which transitively
+      # runs gradle for K/Native compile + framework embed/sign + IPA export
+      # + TestFlight upload) is the only step that's hung on macos-latest so
+      # far. Normal-case duration is ~25-40 min; if it exceeds 50 it's
+      # virtually certainly hung (e.g., daemon collision recurrence, codesign
+      # waiting on keychain, TestFlight upload stuck). Cancelling the step
+      # frees the runner to run cleanup and surfaces a clear "this step
+      # timed out" signal instead of the opaque outer-job timeout.
+      - name: Build, archive, and export iOS app
+        timeout-minutes: 50
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          # Inject a unique CFBundleVersion per CI run. TestFlight rejects
+          # uploads that re-use a previous build number for the same
+          # CFBundleShortVersionString, which is exactly what would happen
+          # if every dev deploy used the static `1` from project.pbxproj.
+          # GITHUB_RUN_NUMBER is monotonically increasing per workflow run,
+          # so each dev distribution gets a fresh build number without
+          # coupling to the (now manual) Release workflow.
+          if [ -z "${GITHUB_RUN_NUMBER:-}" ]; then
+            echo "::error::GITHUB_RUN_NUMBER is unset — this step must run inside GitHub Actions. A locally-run archive would produce CFBundleVersion=1 and TestFlight would reject the upload as a duplicate."
+            exit 1
+          fi
+          BUILD_NUMBER="$GITHUB_RUN_NUMBER"
+          # MARKETING_VERSION must be a strict 3-int semver per Apple's
+          # CFBundleShortVersionString rules (App Store would reject any
+          # suffix). Read the latest released semver from build.gradle.kts.
+          # Anchor the awk pattern so a doc comment containing
+          # `versionName = "..."` doesn't get parsed as the value.
+          # Android-side build-run uniqueness already comes from
+          # `versionNameSuffix = "-b${GITHUB_RUN_NUMBER}"` on the dev
+          # flavor, so the two stay aligned.
+          VERSION_NAME=$(awk -F'"' '/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"/ {print $2; exit}' app/build.gradle.kts)
+          if [ -z "$VERSION_NAME" ]; then
+            echo "::error::Could not parse versionName from app/build.gradle.kts"
+            exit 1
+          fi
+          # Defensive validation — Apple silently fails archives where
+          # CFBundleShortVersionString doesn't match the strict semver
+          # format, so catch it locally with a clear error rather than
+          # discovering it in App Store Connect's review feedback.
+          if ! echo "$VERSION_NAME" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::versionName '$VERSION_NAME' is not a strict 3-int semver (Apple's CFBundleShortVersionString rule)"
+            exit 1
+          fi
+          # Note re Android-side parity: in CI the dev flavor's
+          # versionNameSuffix resolves to "-b${GITHUB_RUN_NUMBER}", so
+          # the two stay aligned per CI run. Locally (Xcode IDE / Android
+          # Studio), Android falls back to `git rev-parse --short HEAD`
+          # and iOS uses CURRENT_PROJECT_VERSION=1 from project.pbxproj
+          # — both fine for non-distributed local builds.
+          echo "Setting CFBundleVersion=${BUILD_NUMBER} MARKETING_VERSION=${VERSION_NAME}"
+          cd iosApp
+          # The app's Release config is manual-signed for App Store distribution
+          # PER-TARGET in project.pbxproj (CODE_SIGN_STYLE=Manual + "Apple
+          # Distribution" identity + "ShyTalk App Store Distribution" profile).
+          # That's the crux: signing passed as GLOBAL xcodebuild build settings
+          # hits every target, including the SwiftPM resource bundles
+          # (SwiftProtobuf_SwiftProtobuf / LiveKit_LiveKit, from the #841 SPM
+          # migration) which can't hold a profile → exit 65; a per-target pbxproj
+          # setting reaches only the app. An App Store profile needs no registered
+          # devices, so this avoids the automatic "team has no devices" failure,
+          # and a real archive sign preserves the app's entitlements (Push, etc).
+          # DEVELOPMENT_TEAM is the only global signing setting (lets the SPM
+          # bundles sign with the team identity, no profile). -exportArchive then
+          # exports for App Store via ExportOptions.plist.
+          xcodebuild \
+            -workspace iosApp.xcworkspace \
+            -scheme iosApp \
+            -sdk iphoneos \
+            -configuration Release \
+            -showBuildTimingSummary \
+            -archivePath "$RUNNER_TEMP/iosApp.xcarchive" \
+            -clonedSourcePackagesDirPath ../build/ios-spm-packages \
+            -parallelizeTargets \
+            DEVELOPMENT_TEAM=F3XX4PM3MF \
+            CURRENT_PROJECT_VERSION="${BUILD_NUMBER}" \
+            MARKETING_VERSION="${VERSION_NAME}" \
+            archive
+          # Export IPA
+          xcodebuild \
+            -exportArchive \
+            -archivePath "$RUNNER_TEMP/iosApp.xcarchive" \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath "$RUNNER_TEMP/export" \
+            -authenticationKeyPath "$RUNNER_TEMP/private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8" \
+            -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
+            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
+          # Verify a single IPA was produced (catches `destination: upload` regressions
+          # that uploaded silently and left no local artifact, breaking the next step)
+          shopt -s nullglob
+          ipas=("$RUNNER_TEMP/export"/*.ipa)
+          shopt -u nullglob
+          if [ "${#ipas[@]}" -eq 0 ]; then
+            echo "::error::xcodebuild -exportArchive completed but no .ipa was written to $RUNNER_TEMP/export/. Check ExportOptions.plist (destination must be 'export', not 'upload')."
+            ls -la "$RUNNER_TEMP/export/" 2>&1 || true
+            exit 1
+          fi
+          if [ "${#ipas[@]}" -gt 1 ]; then
+            echo "::error::Expected exactly one .ipa, found ${#ipas[@]}: ${ipas[*]}"
+            exit 1
+          fi
+          echo "Exported IPA: ${ipas[0]} ($(du -h "${ipas[0]}" | cut -f1))"
+
+      # Surface the exported IPA as a workflow artifact — a downloadable record
+      # of exactly what shipped, useful for inspection / App Store Connect
+      # troubleshooting. NOTE: this IPA is App Store-signed (ExportOptions
+      # method: app-store-connect), so it CANNOT be sideloaded onto a device via
+      # `xcrun devicectl device install app` — that fails with "Attempted to
+      # install a Beta profile without the proper entitlement". On-device
+      # testing goes through TestFlight (uploaded in the next step); sideloading
+      # would need a separate ad-hoc-signed export whose profile lists the
+      # target device UDIDs.
+      - name: Upload IPA as workflow artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: dev-ios-ipa
+          path: ${{ runner.temp }}/export/*.ipa
+          # if-no-files-found: error — the upstream step already
+          # validates IPA count via shell glob + exit 1, so this is
+          # defence-in-depth. Without it, an unexpected file-naming
+          # change could silently upload an empty artifact.
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload to TestFlight
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          ipas=("$RUNNER_TEMP/export"/*.ipa)
+          shopt -u nullglob
+          # Post-export step already verified exactly one IPA exists. Re-glob is
+          # only needed to populate ipas[0] for altool's -f arg.
+          # altool is famous for printing product-errors to stdout while exiting 0
+          # (auth-key revoked, asset validation rejection, etc). Capture output
+          # and grep it so we fail loudly when ASC reports an upload-time error.
+          # `set -o pipefail` (already on from `set -euo pipefail`) makes a
+          # non-zero altool exit propagate through the `tee` pipe, so we don't
+          # need PIPESTATUS gymnastics — set -e aborts before the grep runs.
+          upload_log="$RUNNER_TEMP/altool-upload.log"
+          xcrun altool --upload-app \
+            -f "${ipas[0]}" \
+            -t ios \
+            --apiKey "$APP_STORE_CONNECT_KEY_ID" \
+            --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID" \
+            --output-format xml 2>&1 | tee "$upload_log"
+          if grep -qE '<key>product-errors</key>|<key>tool-errors</key>' "$upload_log"; then
+            echo "::error::altool reported errors despite exit 0 — see log above"
+            exit 1
+          fi
+          echo "altool upload accepted by App Store Connect"
+
+      - name: Ensure TestFlight internal-group auto-distribution
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        # Without this, builds upload but stay in App Store Connect → TestFlight
+        # → Builds without being pushed to internal testers — the symptom that
+        # left testers on build 17 from March 12 even after the upload bug
+        # (PR #372) was fixed. See scripts/ensure-testflight-auto-distribution.js
+        # for the implementation. Idempotent: silently no-ops when groups
+        # already have hasAccessToAllBuilds=true.
+        run: node scripts/ensure-testflight-auto-distribution.js
+
+      - name: Clean up signing material
+        if: always()
+        uses: ./.github/actions/cleanup-ios-signing
+        with:
+          app-store-connect-key-id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+
+      # Paired with the Restore Kotlin/Native cache step at the head
+      # of the job. Runs as a regular step (NOT a synthetic POST step
+      # like combined actions/cache) so the safety attributes below
+      # actually apply when GitHub's cache backend hangs mid-upload.
+      # See ios-tests.yml PR #951 for the original split rationale.
+      - name: Save Kotlin/Native cache (~/.konan)
+        if: always() && steps.konan-cache-restore.outputs.cache-hit != 'true'
+        timeout-minutes: 10
+        continue-on-error: true
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.konan
+          key: ${{ steps.konan-cache-restore.outputs.cache-primary-key }}
+
+  sanity-check:
+    name: Dev Sanity Check
+    needs: [deploy-backend-dev, deploy-web-dev]
+    if: |
+      always() &&
+      inputs.playwright &&
+      (needs.deploy-backend-dev.result == 'success' || needs.deploy-backend-dev.result == 'skipped') &&
+      (needs.deploy-web-dev.result == 'success' || needs.deploy-web-dev.result == 'skipped')
+    runs-on: ubuntu-latest
+    # Was 5 min; sanity-check spent ALL 5 min on a cold playwright browser
+    # download (~284 MB total: Chrome for Testing 170 MB + Headless Shell
+    # 112 MB + FFmpeg 2 MB) before the actual tests could even start.
+    # Run 25763744882 on 2026-05-12 cancelled with `##[error]The operation
+    # was canceled.` literally one second after the chromium download
+    # finished. Bumping to 10 min gives ~5 min headroom for the install,
+    # which is enough even on a slow runner; the actual tests are sub-
+    # 30s. Combined with the browser cache below, warm runs will complete
+    # well under the limit.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Honour the optional `ref` input so the operator can deploy a
+          # specific branch, tag (e.g. `v0.97.1`), or commit SHA. Falls
+          # back to the workflow_dispatch ref dropdown when unset (which
+          # supports branches and tags but not commits — hence the
+          # explicit input).
+          ref: ${{ inputs.ref || github.ref }}
+          # `actions/checkout` defaults to fetch-depth: 1 which only
+          # includes the tip of the named ref. A commit-SHA `inputs.ref`
+          # may NOT be at the tip of any branch/tag, in which case
+          # checkout fails with `fatal: reference is not a tree`. Pull
+          # full history when the operator overrides ref so any SHA is
+          # reachable; keep depth 1 for default-ref runs to save time.
+          # IMPORTANT: use string literals '0'/'1' here. GitHub Actions
+          # expression `cond && 0 || 1` evaluates to `1` even when cond
+          # is true because numeric 0 is falsy (JS-style coercion), so
+          # the `|| 1` short-circuit fires. Strings "0"/"1" are both
+          # truthy, so `cond && '0' || '1'` correctly returns '0' when
+          # cond is true. `actions/checkout` parses the input as int.
+          fetch-depth: ${{ inputs.ref != '' && '0' || '1' }}
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Get Playwright version
+        id: pw
+        run: echo "version=$(npx playwright --version)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Playwright browsers from cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-browsers-${{ steps.pw.outputs.version }}
+
+      # Always run — install is idempotent and self-heals stale/missing
+      # cached browsers (same pattern as `playwright-tests.yml` after the
+      # 2026-05-12 fix in PR #653). The browser cache speeds the no-op
+      # path; without the cache restore above, a cold install can use
+      # the entire 5-min sanity-check budget (incident 2026-05-12, run
+      # 25763744882 cancelled after spending all 5 min downloading).
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Run sanity checks against Dev
+        env:
+          WEB_BASE_URL: https://dev.shytalk.shyden.co.uk
+          API_BASE_URL: https://dev-api.shytalk.shyden.co.uk
+          # Dev web is behind HTTP Basic auth as part of the lockdown
+          # (PR #441 — Cloudflare Pages Function `_middleware.js`). The
+          # spec passes this via Playwright's `httpCredentials` option
+          # so the sanity check can reach the page after deploy. The
+          # API surface (dev-api) does NOT have basic auth, so it's
+          # untouched.
+          DEV_BASIC_AUTH_PASSWORD: ${{ secrets.DEV_BASIC_AUTH_PASSWORD }}
+        run: npx playwright test tests/web/dev-sanity.spec.ts --project=chromium --reporter=list
+
+  smoke-tests:
+    name: Dev Smoke Tests
+    # Runs end-to-end against the deployed dev environment using a
+    # real (non-admin) Firebase test account. Catches infrastructure
+    # regressions that page-load sanity checks miss: Firebase Auth,
+    # firebaseUid → uniqueId resolution, transactional Firestore
+    # writes, public-write Firestore rules.
+    #
+    # Gating: depends on sanity-check (page-load tier) so we don't
+    # waste a smoke run on an obviously-broken deploy. The deploy
+    # job itself is RED on smoke failure — see `feedback-tests-always-block`.
+    needs: [deploy-backend-dev, sanity-check]
+    if: |
+      always() &&
+      inputs.playwright &&
+      needs.deploy-backend-dev.result == 'success' &&
+      needs.sanity-check.result == 'success'
+    runs-on: ubuntu-latest
+    # Same justification as sanity-check: was 8 min, but a cold playwright
+    # install can swallow 4-5 min of that on its own. Bumped to 12 min so
+    # the actual smoke tests have headroom. With the browser cache below
+    # warm runs complete much faster.
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: ${{ inputs.ref != '' && '0' || '1' }}
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Get Playwright version
+        id: pw
+        run: echo "version=$(npx playwright --version)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Playwright browsers from cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-browsers-${{ steps.pw.outputs.version }}
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Verify smoke-test secrets are present
+        # Fail fast if the operator forgot to configure the secrets —
+        # otherwise Playwright would `test.skip()` the entire suite
+        # silently and the deploy would look healthy with zero
+        # coverage. Per `feedback-tests-always-block` we never accept
+        # a silent skip on a gating job.
+        env:
+          SMOKE_FIREBASE_API_KEY: ${{ secrets.SMOKE_FIREBASE_API_KEY || secrets.DEV_FIREBASE_API_KEY }}
+          SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
+          SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+          # uniqueId of the inert dev account the follow/unfollow
+          # journey targets. See reference-dev-smoke-account.md for
+          # the orphan-account candidates (10000008, 10000009).
+          SMOKE_TARGET_UNIQUE_ID: ${{ secrets.SMOKE_TARGET_UNIQUE_ID }}
+        run: |
+          missing=()
+          [ -n "$SMOKE_FIREBASE_API_KEY" ] || missing+=("SMOKE_FIREBASE_API_KEY (or DEV_FIREBASE_API_KEY)")
+          [ -n "$SMOKE_TEST_EMAIL" ] || missing+=("SMOKE_TEST_EMAIL")
+          [ -n "$SMOKE_TEST_PASSWORD" ] || missing+=("SMOKE_TEST_PASSWORD")
+          [ -n "$SMOKE_TARGET_UNIQUE_ID" ] || missing+=("SMOKE_TARGET_UNIQUE_ID")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing smoke-test secrets: ${missing[*]}"
+            echo "::error::See tests/web/dev-smoke.spec.ts header for setup instructions."
+            exit 1
+          fi
+
+      - name: Run dev smoke tests
+        env:
+          API_BASE_URL: https://dev-api.shytalk.shyden.co.uk
+          # SMOKE_FIREBASE_API_KEY is the public Firebase web API key
+          # (same value as DEV_FIREBASE_API_KEY — these keys are not
+          # secrets, they identify the project to the Auth REST API).
+          # Falls back to DEV_FIREBASE_API_KEY so single-secret setups
+          # work without duplication.
+          SMOKE_FIREBASE_API_KEY: ${{ secrets.SMOKE_FIREBASE_API_KEY || secrets.DEV_FIREBASE_API_KEY }}
+          SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
+          SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+          SMOKE_TARGET_UNIQUE_ID: ${{ secrets.SMOKE_TARGET_UNIQUE_ID }}
+          # Firestore REST URL needs the project ID — not a secret
+          # (the project ID is referenced openly in firebase deploy
+          # steps in this same workflow at the firebase-project key).
+          # The LiveKit smoke test pre-creates a same-cohort room doc
+          # via Firestore REST per UK OSA #17 PR 7's gate requirement.
+          FIREBASE_PROJECT_ID: shytalk-dev
+          # Smoke spec only hits API + Firebase Auth REST. No web
+          # surface, so DEV_BASIC_AUTH_PASSWORD is not required here.
+        run: npx playwright test tests/web/dev-smoke.spec.ts --project=chromium --reporter=list

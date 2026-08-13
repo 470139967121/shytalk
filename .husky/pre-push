@@ -1,0 +1,219 @@
+#!/usr/bin/env sh
+
+# Block force-pushes locally — backed by repo ruleset 16058327
+# (`non_fast_forward` enforcement on `~ALL` refs) but the local check
+# fails fast without a network round-trip. Force-pushes erase commit
+# history, break PR references, and confuse SonarCloud's PR analysis.
+# See feedback-no-force-push memory for rationale.
+#
+# Reads stdin (git's pre-push protocol): `<local ref> <local sha> <remote ref> <remote sha>`
+# A force-push is a non-fast-forward update — i.e. the remote sha is NOT
+# an ancestor of the local sha (and neither is zero, which signals delete
+# or new branch).
+ZERO=0000000000000000000000000000000000000000
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # New branch (remote_sha is zero) or delete (local_sha is zero) — allowed.
+  if [ "$remote_sha" = "$ZERO" ] || [ "$local_sha" = "$ZERO" ]; then
+    continue
+  fi
+  # Check fast-forward: remote_sha must be reachable from local_sha.
+  if ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+    echo ""
+    echo "✗ Force-push blocked: $local_ref → $remote_ref is not a fast-forward."
+    echo "  Create a new commit instead of amending + force-pushing."
+    echo "  See ~/.claude/projects/.../memory/feedback-no-force-push.md"
+    exit 1
+  fi
+done
+
+# SHY-0066: removed the pre-push call to `scripts/generate-roadmap-json.js`
+# (deprecated by SHY-0038's `scripts/sync-shy-to-roadmap-data.mjs`). The new
+# generator is SHY-corpus-driven + runs in CI via
+# `.github/workflows/sync-roadmap-data.yml` on every push to main. The old
+# script's output had no `_meta` block + no `items[]` shape; its pre-push
+# amend silently OVERWROTE the SHY-derived JSON every push, corrupting PR
+# diffs. Removed cleanly; the workflow handles regen server-side under
+# App-signed commits (ruleset 12613584 bypass_actors). Operator-authorised
+# in SHY-0066 AskUserQuestion at 2026-06-09 ~11:30 BST.
+
+# Load .env if SONAR_TOKEN not already set
+if [ -z "$SONAR_TOKEN" ] && [ -f ".env" ]; then
+  SONAR_TOKEN=$(grep '^SONAR_TOKEN=' .env 2>/dev/null | cut -d= -f2-)
+  export SONAR_TOKEN
+fi
+
+CHANGED=$(git diff --name-only origin/main...HEAD 2>/dev/null)
+
+# Always run paid-runner guard — protects against PR #370-style regressions
+# where a workflow file gets bumped to a paid runner spec that personal-
+# account public repos can't allocate, blocking CI indefinitely. Cost ~10ms.
+if ! bash scripts/check-no-paid-runners.sh; then
+  echo ""
+  echo "✗ Paid runner specs detected — push blocked"
+  exit 1
+fi
+
+# Guard against regressions to the manual-release flow: any push trigger
+# on release.yml would re-introduce the auto-release-per-merge behaviour
+# that small-PR cadence was built to avoid, and any deploy-dev.yml
+# without a unique CFBundleVersion would resurrect TestFlight duplicate-
+# build-number rejections. Runs unconditionally on every push (the script
+# itself is fast — small grep over two YAML files — so we don't gate it
+# on path filters).
+if ! bash scripts/check-release-trigger.sh; then
+  echo ""
+  echo "✗ Release/dev-versioning guard tripped — push blocked"
+  exit 1
+fi
+
+# Node-major guard (SHY-0069): abort fast, unconditionally on every push,
+# if the local node major drifted from .nvmrc. brew's floating `node`
+# formula upgraded to 26.3.0 on 2026-06-09 and wedged every full Jest run.
+# Runs FIRST — before the ratchet (the hook's first `node` call) and the
+# HAS_CODE path filter — so even a config-only push (e.g. someone editing
+# .nvmrc itself) gets the drift check, and the ratchet runs under a node
+# whose major is already verified.
+bash scripts/check-node-version.sh || exit 1
+
+# SHY-0108 (EPIC-0003 Phase X): the in-process-double debt (jest.mock /
+# Fake*Repository / page.route) may only SHRINK. Fails on any NEW double
+# not in scripts/no-stubs-baseline.json, or a stale baseline entry a
+# migration forgot to remove. Fast (one git ls-files + scan).
+if ! node scripts/check-no-new-stubs.js; then
+  echo ""
+  echo "✗ no-new-stubs ratchet tripped — push blocked (EPIC-0003)"
+  echo "  Migrate the new double to the real local stack, or run"
+  echo "  'node scripts/check-no-new-stubs.js --generate-baseline' after a"
+  echo "  legitimate migration to shrink the baseline."
+  exit 1
+fi
+
+# Block any file >5MB from being added in this push's diff vs origin/main.
+# See SHY-0035 (.project/audit/repo-size-audit-2026-06-08.md). Pre-existing
+# tracked >5MB files are out-of-scope here (diff-only mode); CI's lint job
+# uses the same script with the same flag for the authoritative gate.
+# Skip if origin/main isn't fetched locally (e.g. first push of a fresh
+# clone) — CI will still catch large additions even if this local hook
+# can't.
+if git rev-parse --verify origin/main >/dev/null 2>&1; then
+  if ! bash scripts/check-large-files.sh --against origin/main; then
+    echo ""
+    echo "✗ check-large-files.sh tripped — push blocked"
+    echo "  Either remove the offending file, move it to a CDN / Git LFS,"
+    echo "  or add an [allow-large-file: <path> reason: ...] marker to the"
+    echo "  PR description (CI will read it via ALLOW_LARGE_FILE_BODY)."
+    exit 1
+  fi
+fi
+
+# Run actionlint on workflow changes BEFORE the SonarCloud check (so workflow
+# regressions don't slip through when nothing else changes). This catches
+# unquoted globs, missing `set -euo pipefail`, and other silent-failure
+# shapes locally before they reach CI. Skips silently if actionlint isn't
+# installed locally — CI will catch them.
+HAS_WORKFLOW_CHANGES=false
+if echo "$CHANGED" | grep -qE '^\.github/(workflows|actions)/'; then
+  HAS_WORKFLOW_CHANGES=true
+fi
+
+if [ "$HAS_WORKFLOW_CHANGES" = "true" ] && command -v actionlint >/dev/null 2>&1; then
+  echo "  → actionlint (workflow + embedded shellcheck)..."
+  if ! actionlint -shellcheck='-e SC2086'; then
+    echo ""
+    echo "✗ actionlint failed — push blocked"
+    echo "  Install: brew install actionlint  (or see https://github.com/rhysd/actionlint)"
+    exit 1
+  fi
+  echo "  ✓ actionlint passed"
+fi
+
+# Skip SonarCloud for workflow-only changes. Include public/ so changes
+# to admin/translations.js (and other web JS bundles tested under
+# express-api/tests/scripts/) trigger the parity guards on push — the
+# 41-key admin gap accumulated silently because public/ was excluded.
+HAS_CODE=false
+if echo "$CHANGED" | grep -qE '^(app/|shared/|express-api/src/|express-api/tests/|public/)'; then
+  HAS_CODE=true
+fi
+
+if [ "$HAS_CODE" = "false" ]; then
+  echo "No code changes — skipping SonarCloud pre-push scan"
+  exit 0
+fi
+
+# SONAR_TOKEN is required for code changes
+if [ -z "$SONAR_TOKEN" ]; then
+  echo "✗ SONAR_TOKEN not set — push blocked"
+  echo "  Add SONAR_TOKEN=your_token to .env or set it as an environment variable"
+  exit 1
+fi
+
+echo "Running SonarCloud pre-push scan..."
+
+# Express API tests with coverage. The `--experimental-vm-modules` flag is
+# needed since express-api/src/utils/data-export-builder.js uses dynamic
+# `import('archiver')` (archiver v8 is ESM-only); Jest's default CJS VM
+# rejects `import()` callbacks without that flag. Mirrors the npm `test`
+# script in express-api/package.json so both call sites stay in sync.
+# stderr is intentionally NOT discarded (SHY-0069): a wedged/failing run
+# must be visible — `2>/dev/null` here cost hours of blind diagnosis.
+echo "  → Express tests with coverage..."
+cd express-api && node --experimental-vm-modules node_modules/.bin/jest --coverage --coverageReporters=lcov --forceExit --silent
+cd ..
+
+# Kotlin JVM tests (for coverage reports)
+echo "  → Kotlin JVM tests..."
+./gradlew :shared:jvmTest --quiet 2>/dev/null
+
+# Run SonarCloud analysis with quality gate wait
+echo "  → SonarCloud analysis..."
+if ! ./gradlew sonar \
+  -Dsonar.token="$SONAR_TOKEN" \
+  -Dsonar.qualitygate.wait=true \
+  -x :app:sonar \
+  --no-configuration-cache; then
+  echo ""
+  echo "✗ SonarCloud quality gate FAILED — push blocked"
+  echo "  Fix the issues and try again."
+  echo "  Dashboard: https://sonarcloud.io/dashboard?id=ShydenMcM_ShyTalk"
+  exit 1
+fi
+
+echo "✓ SonarCloud quality gate passed"
+
+# Run Playwright against a single browser (chromium) if web files changed
+HAS_WEB=false
+if echo "$CHANGED" | grep -qE '^(public/|tests/web/)'; then
+  HAS_WEB=true
+fi
+
+if [ "$HAS_WEB" = "true" ]; then
+  # Check local stack is running (Express API at :3000, web server at :8888)
+  if ! curl -s -o /dev/null http://localhost:3000/api/health; then
+    echo ""
+    echo "⚠ Web changes detected but local stack not running — skipping Playwright pre-push"
+    echo "  To enable: bash local/start.sh && cd express-api && npm run local"
+  elif ! curl -s -o /dev/null http://localhost:8888/; then
+    echo ""
+    echo "⚠ Web changes detected but web server not running on :8888 — skipping Playwright pre-push"
+    echo "  To enable: npx serve public -l 8888 &"
+  else
+    echo "Running Playwright pre-push (chromium only)..."
+    # Use --reporter=list: writes one line per test result and flushes per-line.
+    # Do NOT use --reporter=line here: it uses ANSI cursor movement that gets
+    # swallowed when stdout is captured/piped, producing 0-byte output files.
+    # Do NOT pipe to `tail -N`: tail buffers until EOF, hiding live progress.
+    if ! API_BASE_URL=http://localhost:3000 \
+      WEB_BASE_URL=http://localhost:8888 \
+      ADMIN_EMAIL=claude-test@shytalk.dev \
+      ADMIN_PASSWORD=localdev123 \
+      TEST_API_KEY=local-test-key \
+      npx playwright test --project=chromium --reporter=list; then
+      echo ""
+      echo "✗ Playwright chromium tests FAILED — push blocked"
+      echo "  ALL failing tests must be fixed (including pre-existing failures)."
+      exit 1
+    fi
+    echo "✓ Playwright chromium tests passed"
+  fi
+fi

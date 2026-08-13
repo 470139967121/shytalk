@@ -1,0 +1,174 @@
+*.iml
+.gradle
+/local.properties
+.idea/
+.DS_Store
+**/build
+/captures
+.kotlin/
+.externalNativeBuild
+.cxx
+local.properties
+/keystore.jks
+/play-service-account.json
+shytalk-7ba69-firebase-adminsdk-*.json
+shytalk-dev-firebase-adminsdk*.json
+
+# Firebase config (contains API keys — injected from secrets in CI)
+**/google-services.json
+worker/node_modules/
+worker/.wrangler/
+worker-api/node_modules/
+worker-api/.wrangler/
+.env
+
+# Manual QA failure screenshots (never commit)
+.project/test-plans/failures/
+
+# Local development
+local/firebase-emulator-data/
+express-api/.env.local
+
+# Config files injected at deploy time (contain Firebase API keys)
+public/admin/config.js
+public/admin/config.dev.js
+public/portal/config.js
+public/js/roadmap-config.js
+.scannerwork/
+/node_modules/
+e2e_results/
+test_output.txt
+nul
+coverage/
+
+# JVM crash/replay logs
+hs_err_pid*.log
+replay_pid*.log
+
+# Playwright
+.playwright-mcp/
+playwright-report/
+playwright-results.xml
+playwright-errors.log
+
+# Migration scripts (one-time use)
+scripts/migrate-*.mjs
+
+# Migration snapshots — contain displayName + cohort tags (PII-adjacent)
+express-api/migration-snapshots/
+
+# Archived Cloud Functions (deleted from project)
+functions-archive/
+
+# R2 local backups
+backups/
+
+# Git worktrees
+.worktrees/
+
+# iOS / Xcode
+iosApp/iosApp.xcodeproj/xcuserdata/
+iosApp/iosApp.xcodeproj/project.xcworkspace/xcuserdata/
+iosApp/iosApp.xcworkspace/xcuserdata/
+# Xcode regenerates SPM Package.resolved inside the xcodeproj bundle when
+# someone opens iosApp.xcodeproj instead of the canonical iosApp.xcworkspace.
+# The canonical copy at iosApp/iosApp.xcworkspace/xcshareddata/swiftpm/
+# Package.resolved IS tracked; this duplicate must stay ignored to prevent
+# drift between the two workspaces.
+iosApp/iosApp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+iosApp/DerivedData/
+iosApp/Pods/
+*.xcarchive
+*.xcuserstate
+
+# Local Firebase emulator exports (manual `firebase emulators:export` output)
+firebase-export-*/
+
+# Claude Code session-local state
+.claude/scheduled_tasks.lock
+# Personal /config + auto-mode auto-writes; matches the documented
+# settings-load-order convention (project/settings.local.json is the
+# personal-overrides slot, not committed to the repo).
+.claude/settings.local.json
+
+# Investigation screenshots that don't belong in source
+apple-edit-profile.png
+apple-signin.png
+
+# Generator output for the gh-pages Allure landing — built by
+# `scripts/generate-allure-landing.js` and deployed by the
+# allure-report workflow. Should never be committed on main.
+gh-pages/
+
+# Test results
+test-results/
+allure-results/
+allure-report/
+
+# Internal project docs (plans, specs)
+# Per-subdir excludes (NOT a blanket `.project/`) so that .project/stories/
+# can stay TRACKED while everything else stays local-only. Git's gitignore
+# spec disallows re-including files under a fully-excluded parent
+# (https://git-scm.com/docs/gitignore "It is not possible to re-include a
+# file if a parent directory of that file is excluded"), which is why we
+# enumerate each ignored subdir rather than using `.project/` + a negation.
+.project/plans/
+.project/specs/
+.project/test-plans/
+.project/test-reports/
+.project/audit-findings-*.md
+.project/ios-build-warnings-debt.md
+
+# Claude Code agents (auto-generated)
+.claude/agents/
+.superpowers/
+tests/web/.auth/
+
+# Express API coverage
+express-api/coverage/
+
+# Firebase emulator debug logs
+firebase-debug.log
+firestore-debug.log
+database-debug.log
+
+# Deployed git SHA marker — written by deploy workflow on the server
+express-api/.deployed-sha
+journey-results/
+
+# ─── SHY-0035 (2026-06-08): prevent re-commit of Allure-pattern CI artefacts ───
+# Historical audit (`.project/audit/repo-size-audit-2026-06-08.md`) found 6
+# top-level directories totalling ~42 GiB ever-committed (12.74 GiB pack)
+# matching the Allure-report tree (`<dir>/pr/<n>/`, `<dir>/deploy/`,
+# `<dir>/latest/`, `data/attachments/<hex>.zip`, `history/*-trend.json`).
+# All currently have 0 files tracked but blobs persist in `.git/`. These
+# rules prevent any future regression. Each entry is `/`-anchored at repo
+# root so it doesn't shadow legitimate nested directories with the same
+# name.
+/data/
+/playwright/pr/
+/playwright/deploy/
+/playwright/latest/
+# Widened from `/express/pr/` (architect Suggestion 2026-06-08) — the
+# Allure variant could emit `express/deploy/` or `express/latest/` too;
+# `/express-api/` is the actual tracked source dir, distinct path.
+/express/
+/history/
+# Same widening rationale — block all `kotlin/` subpaths at root.
+/kotlin/
+/android-e2e/
+
+# Compiled mobile bundles — never commit; use the deploy workflow for
+# Play Store / TestFlight uploads. The existing `**/build` entry covers
+# generated `.apk`/`.aab` under `app/build/`, but explicit extension
+# blocks catch any rogue copy made outside the build dir.
+*.apk
+*.aab
+*.ipa
+
+# Reject `.zip` blanket-style — every large historical blob in the
+# 2026-06-08 audit was an Allure attachment `.zip`. If a future
+# legitimate small `.zip` needs to be tracked (e.g. a font bundle),
+# add an explicit `!path/to/legit.zip` negation here. Verify nothing
+# legitimate is currently tracked via `git ls-files '*.zip'`.
+*.zip

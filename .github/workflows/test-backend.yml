@@ -1,0 +1,149 @@
+name: Test Backend
+
+# Per-ref concurrency: newer commit on the same PR cancels in-progress
+# backend-test runs. See lint.yml for the full rationale. Pinned by
+# express-api/tests/scripts/reusable-workflow-concurrency.test.js.
+concurrency:
+  group: test-backend-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Git ref to check out'
+        type: string
+        required: true
+      report_env:
+        description: 'Report environment: pr or deploy'
+        type: string
+        default: 'pr'
+
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to test (default: main)'
+        type: string
+        default: 'main'
+      report_env:
+        description: 'Report environment: pr or deploy'
+        type: string
+        default: 'pr'
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  test-backend:
+    name: Test Backend
+    runs-on: ubuntu-latest
+    # 15 (was 10) to absorb the first cold-cache Firebase-emulator boot
+    # added below for EPIC-0003 Phase 3 (real-firebase Jest tests).
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - uses: ./.github/actions/setup-node
+        with:
+          cache: 'npm'
+
+      # The Firestore + RTDB emulators are JVM-based, so a JDK must be
+      # present before they start. Reuses the repo-wide SHA pin for
+      # actions/setup-java (see .github/actions/setup-jdk-gradle) to
+      # satisfy the SHA-pin supply-chain guard.
+      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      # EPIC-0003 / SHY-0120: provision the REAL R2 (MinIO) + email
+      # (Mailpit) backends the cron Jest tests exercise (expireDataExports,
+      # rotateLogs, orphanedStorage, backups, accountDeletion). Without
+      # these their beforeAll fails on a MinIO/Mailpit connection refusal.
+      # Same action the playwright/e2e/integration workflows use; mirrors
+      # local/docker-compose (MinIO 9002→9000 minioadmin; Mailpit 1025/8025).
+      # Started before the Firebase emulators so the image pulls overlap
+      # with emulator boot.
+      - uses: ./.github/actions/start-local-services
+
+      # EPIC-0003 Phase 3: provision the REAL Firebase emulator stack
+      # (Auth/Firestore/RTDB under projectId demo-shytalk — $0,
+      # credential-free) so the express Jest suite runs against real
+      # services instead of jest.mock(firebase). Caches emulator JARs.
+      - uses: ./.github/actions/start-firebase-emulators
+
+      # Block until MinIO + Mailpit answer before running the suite — the
+      # cron tests hit both in beforeAll, so an unready container is a hard
+      # failure, not a flake.
+      - name: Wait for MinIO + Mailpit to be ready
+        shell: bash
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:9002/minio/health/live >/dev/null \
+               && curl -sf http://localhost:8025/api/v1/messages >/dev/null; then
+              echo "MinIO + Mailpit ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::MinIO/Mailpit did not become ready within 60s"
+          exit 1
+
+      - name: Run Express API tests with coverage
+        # `--experimental-vm-modules` lets Jest's CJS VM resolve dynamic
+        # `import()` callbacks — required since data-export-builder.js uses
+        # `import('archiver')` (archiver v8 is ESM-only). Mirrors the
+        # `test` script in express-api/package.json.
+        run: |
+          cd express-api && npm ci
+          node --experimental-vm-modules node_modules/.bin/jest --coverage --coverageReporters=html --forceExit
+
+      - name: Write metadata.json
+        if: always()
+        env:
+          REPORT_ENV: ${{ inputs.report_env || 'pr' }}
+        run: |
+          PASSED=$(grep -oP '"numPassedTests":\K\d+' express-api/coverage/coverage-summary.json 2>/dev/null || echo 0)
+          FAILED=$(grep -oP '"numFailedTests":\K\d+' express-api/coverage/coverage-summary.json 2>/dev/null || echo 0)
+          TOTAL=$((PASSED + FAILED))
+          DATE=$(date +%Y-%m-%d)
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          mkdir -p express-api/coverage
+          echo "{\"passed\":${PASSED},\"failed\":${FAILED},\"total\":${TOTAL},\"date\":\"${DATE}\",\"runUrl\":\"${RUN_URL}\",\"suite\":\"express\",\"env\":\"${REPORT_ENV}\"}" > express-api/coverage/metadata.json
+
+      - name: Deploy Express report to GitHub Pages
+        # Skip for PR runs (the default 'pr' report_env) and for
+        # dependabot PRs. Three layers of motivation:
+        #   1) Read-only GITHUB_TOKEN: on dependabot-authored runs
+        #      GitHub enforces a read-only token (2021 supply-chain
+        #      tightening), so peaceiris/actions-gh-pages can't push.
+        #   2) gh-pages race condition: when N PRs run CI in the same
+        #      minute (e.g. matrix-completeness batch + dependabot bumps),
+        #      each peaceiris invocation does `git clone gh-pages
+        #      --depth=1`, commits its report, then `git push` — and
+        #      N-1 of those pushes are rejected as non-fast-forward
+        #      because the first push got there first. peaceiris
+        #      doesn't retry. Verified with PR #901's two consecutive
+        #      failures despite the test step itself passing.
+        #   3) PR-branch reports are nice-to-have, not canonical —
+        #      only the dev/prod main-branch reports are linked from
+        #      docs and consumed downstream. Skipping the racey pr
+        #      deploy preserves the deploys that matter.
+        # The condition skips when the resolved report_env is 'pr'
+        # (i.e. neither dev nor prod was supplied), preserving the
+        # main-branch deploy path. We guard on `github.head_ref` (PR's
+        # source branch) instead of `github.actor` so the dependabot
+        # skip applies even when the run is triggered by a non-dependabot
+        # user adding a merge commit to the PR.
+        if: always() && (inputs.report_env == 'dev' || inputs.report_env == 'prod') && !startsWith(github.head_ref, 'dependabot/')
+        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: express-api/coverage
+          destination_dir: express/${{ inputs.report_env || 'pr' }}/latest
+          keep_files: true

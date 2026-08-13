@@ -1,0 +1,238 @@
+/**
+ * Cron: Full database backup to R2.
+ *
+ * Backs up all Firestore collections (top-level + subcollections) to R2
+ * under `backups/full/YYYY-MM-DD/`. Also writes a backwards-compatible
+ * `backups/users/YYYY-MM-DD.json` file.
+ *
+ * Prunes backups older than 7 days.
+ */
+
+const { db } = require('../utils/firebase');
+const r2 = require('../utils/r2');
+const log = require('../utils/log');
+
+// Top-level collections to back up (must match actual Firestore collections)
+const ALL_TOP_LEVEL_COLLECTIONS = [
+  'users',
+  'rooms',
+  'conversations',
+  'config',
+  'identityMap',
+  'counters',
+  'deviceBindings',
+  'gifts',
+  'giftRankings',
+  'broadcasts',
+  'coinPackages',
+  'funFacts',
+  'banners',
+  'reports',
+  'reportsArchive',
+  'reportLocks',
+  'suspensionAppeals',
+  'alerts',
+  'alertConfig',
+  'adminAuditLog',
+  'otpCodes',
+  'biometricKeys',
+  'emailMetrics',
+  'purchaseReceipts',
+  'logConfig',
+  'deviceBans',
+  'networkBans',
+];
+
+// Dev only needs essential data — skip the other 24 collections and all subcollections
+// to save 1,000-3,000 Firestore reads/day
+const DEV_TOP_LEVEL_COLLECTIONS = ['users', 'config', 'counters'];
+
+const TOP_LEVEL_COLLECTIONS =
+  process.env.NODE_ENV === 'production' ? ALL_TOP_LEVEL_COLLECTIONS : DEV_TOP_LEVEL_COLLECTIONS;
+
+// Subcollections: [parentCollection, subcollectionName]
+const ALL_SUBCOLLECTIONS = [
+  ['rooms', 'messages'],
+  ['rooms', 'seatRequests'],
+  ['conversations', 'messages'],
+  ['conversations', 'userSettings'],
+  ['conversations', 'mutes'],
+  ['users', 'backpack'],
+  ['users', 'warnings'],
+  ['users', 'giftWall'],
+  ['users', 'transactions'],
+  ['users', 'stalkers'],
+  ['conversations', 'settings'],
+];
+
+const SUBCOLLECTIONS = process.env.NODE_ENV === 'production' ? ALL_SUBCOLLECTIONS : [];
+
+/**
+ * Back up a single top-level collection.
+ * Returns { name, docs, count }.
+ */
+async function backupCollection(name) {
+  const snapshot = await db.collection(name).get();
+  const docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+  return { name, docs, count: docs.length };
+}
+
+/**
+ * Back up a subcollection across all parent docs.
+ * Returns { name, docs, count } where name = `parent_sub`.
+ */
+async function backupSubcollection(parentCollection, subName) {
+  const parentSnapshot = await db.collection(parentCollection).get();
+  const allDocs = [];
+
+  for (const parentDoc of parentSnapshot.docs) {
+    const subSnapshot = await db
+      .collection(parentCollection)
+      .doc(parentDoc.id)
+      .collection(subName)
+      .get();
+
+    for (const subDoc of subSnapshot.docs) {
+      allDocs.push({
+        id: subDoc.id,
+        parentId: parentDoc.id,
+        ...subDoc.data(),
+      });
+    }
+  }
+
+  const name = `${parentCollection}_${subName}`;
+  return { name, docs: allDocs, count: allDocs.length };
+}
+
+/**
+ * Run a full database backup.
+ *
+ * The collection scope defaults to the env-derived constants
+ * (TOP_LEVEL_COLLECTIONS + SUBCOLLECTIONS) so a no-arg call behaves exactly as
+ * before. Callers may override either list — e.g. an admin "back up everything
+ * now" action, or a targeted backup — by passing `{ topLevelCollections,
+ * subcollections }`.
+ *
+ * Returns { date, manifest } on success.
+ */
+async function backups({
+  topLevelCollections = TOP_LEVEL_COLLECTIONS,
+  subcollections = SUBCOLLECTIONS,
+} = {}) {
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const prefix = `backups/full/${today}`;
+  const manifest = { date: today, timestamp: new Date().toISOString(), collections: {} };
+
+  // Back up top-level collections (retain users JSON for backwards-compat copy)
+  let usersJsonStr = null;
+  for (const collName of topLevelCollections) {
+    try {
+      const { name, docs, count } = await backupCollection(collName);
+      const key = `${prefix}/${name}.json`;
+      const jsonStr = JSON.stringify(docs, null, 2);
+
+      if (name === 'users') usersJsonStr = jsonStr;
+
+      await r2.putObject(key, Buffer.from(jsonStr), 'application/json', {
+        docCount: String(count),
+        createdAt: new Date().toISOString(),
+      });
+
+      manifest.collections[name] = count;
+      log.info('cron', 'backup: collection saved', {
+        collection: name,
+        docs: count,
+        bytes: jsonStr.length,
+      });
+    } catch (err) {
+      log.error('cron', 'backup: collection failed', { collection: collName, error: err.message });
+    }
+  }
+
+  // Back up subcollections
+  for (const [parent, sub] of subcollections) {
+    try {
+      const { name, docs, count } = await backupSubcollection(parent, sub);
+      const key = `${prefix}/${name}.json`;
+      const jsonStr = JSON.stringify(docs, null, 2);
+
+      await r2.putObject(key, Buffer.from(jsonStr), 'application/json', {
+        docCount: String(count),
+        createdAt: new Date().toISOString(),
+      });
+
+      manifest.collections[name] = count;
+      log.info('cron', 'backup: subcollection saved', {
+        collection: name,
+        docs: count,
+        bytes: jsonStr.length,
+      });
+    } catch (err) {
+      log.error('cron', 'backup: subcollection failed', {
+        collection: `${parent}_${sub}`,
+        error: err.message,
+      });
+    }
+  }
+
+  // Write manifest
+  const manifestKey = `${prefix}/manifest.json`;
+  const manifestStr = JSON.stringify(manifest, null, 2);
+  await r2.putObject(manifestKey, Buffer.from(manifestStr), 'application/json');
+  log.info('cron', 'backup: manifest written', { key: manifestKey });
+
+  // Backwards compatibility: reuse the in-memory users JSON (no extra Firestore read)
+  const usersKey = `backups/users/${today}.json`;
+  const usersCount = manifest.collections['users'] || 0;
+  await r2.putObject(usersKey, Buffer.from(usersJsonStr || '[]'), 'application/json', {
+    userCount: String(usersCount),
+    createdAt: new Date().toISOString(),
+  });
+  log.info('cron', 'backup: backwards-compat users backup saved', {
+    key: usersKey,
+    users: usersCount,
+  });
+
+  // Prune full backups older than 7 days
+  await pruneOldBackups('backups/full/');
+  // Also prune legacy users backups
+  await pruneOldBackups('backups/users/');
+
+  return { date: today, manifest };
+}
+
+/**
+ * Prune backups older than 7 days under the given prefix.
+ * For `backups/full/` prefix, date is extracted from the folder name.
+ * For `backups/users/` prefix, date is extracted from the filename.
+ */
+async function pruneOldBackups(prefix) {
+  const allKeys = await r2.listObjects(prefix);
+  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+
+  const toDelete = allKeys.filter((objKey) => {
+    let dateStr;
+    if (prefix === 'backups/full/') {
+      const parts = objKey.replace(prefix, '').split('/');
+      dateStr = parts[0];
+    } else {
+      dateStr = objKey.replace(prefix, '').replace('.json', '');
+    }
+
+    const backupDate = new Date(dateStr + 'T00:00:00Z');
+    return !Number.isNaN(backupDate.getTime()) && backupDate.getTime() < sevenDaysAgo;
+  });
+
+  if (toDelete.length > 0) {
+    await r2.deleteObjects(toDelete);
+    log.info('cron', 'backup: pruned old backups', { prefix, count: toDelete.length });
+  }
+}
+
+module.exports = backups;
+module.exports.TOP_LEVEL_COLLECTIONS = TOP_LEVEL_COLLECTIONS;
+module.exports.ALL_TOP_LEVEL_COLLECTIONS = ALL_TOP_LEVEL_COLLECTIONS;
+module.exports.DEV_TOP_LEVEL_COLLECTIONS = DEV_TOP_LEVEL_COLLECTIONS;
+module.exports.SUBCOLLECTIONS = SUBCOLLECTIONS;
+module.exports.ALL_SUBCOLLECTIONS = ALL_SUBCOLLECTIONS;

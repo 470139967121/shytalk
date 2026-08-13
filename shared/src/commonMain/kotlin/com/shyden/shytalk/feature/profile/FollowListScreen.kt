@@ -1,0 +1,495 @@
+package com.shyden.shytalk.feature.profile
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
+import com.shyden.shytalk.core.model.ProfileVisitor
+import com.shyden.shytalk.core.model.User
+import com.shyden.shytalk.core.ui.StyledDisplayName
+import com.shyden.shytalk.core.ui.StyledSnackbarHost
+import com.shyden.shytalk.core.util.formatRelativeTime
+import com.shyden.shytalk.core.util.rememberRelativeTimeStrings
+import com.shyden.shytalk.resources.*
+import com.shyden.shytalk.resources.Res
+import org.jetbrains.compose.resources.stringResource
+import org.koin.compose.viewmodel.koinViewModel
+import org.koin.core.parameter.parametersOf
+
+@Suppress("kotlin:S3776")
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FollowListScreen(
+    userId: String,
+    tab: String = "followers",
+    onNavigateBack: () -> Unit,
+    onNavigateToUserProfile: (String) -> Unit,
+    onNavigateToSuperShy: () -> Unit = {},
+    viewModel: FollowListViewModel = koinViewModel { parametersOf(userId, tab) },
+) {
+    val uiState by viewModel.uiState.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(uiState.error) {
+        uiState.error?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearError()
+        }
+    }
+
+    Scaffold(
+        snackbarHost = { StyledSnackbarHost(snackbarHostState) },
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(Res.string.connections)) },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(Res.string.back))
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        Column(
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+        ) {
+            val tabCount = if (uiState.isOwnList) 3 else 2
+            val selectedIndex =
+                when (uiState.selectedTab) {
+                    FollowTab.FOLLOWING -> 0
+                    FollowTab.FOLLOWERS -> 1
+                    FollowTab.STALKERS -> 2
+                }
+            PrimaryTabRow(
+                selectedTabIndex = selectedIndex.coerceAtMost(tabCount - 1),
+            ) {
+                Tab(
+                    selected = uiState.selectedTab == FollowTab.FOLLOWING,
+                    onClick = { viewModel.selectTab(FollowTab.FOLLOWING) },
+                    text = { Text(stringResource(Res.string.following_count, uiState.following.size)) },
+                    modifier = Modifier.testTag("followList_followingTab"),
+                )
+                Tab(
+                    selected = uiState.selectedTab == FollowTab.FOLLOWERS,
+                    onClick = { viewModel.selectTab(FollowTab.FOLLOWERS) },
+                    text = { Text(stringResource(Res.string.followers_count, uiState.followers.size)) },
+                    modifier = Modifier.testTag("followList_followersTab"),
+                )
+                if (uiState.isOwnList) {
+                    Tab(
+                        selected = uiState.selectedTab == FollowTab.STALKERS,
+                        onClick = { viewModel.selectTab(FollowTab.STALKERS) },
+                        text = {
+                            val newCount =
+                                uiState.stalkers.count {
+                                    it.lastVisitedAt > uiState.stalkersLastViewedAt
+                                }
+                            if (newCount > 0 && uiState.selectedTab != FollowTab.STALKERS) {
+                                BadgedBox(badge = { Badge { Text("$newCount") } }) {
+                                    Text(stringResource(Res.string.stalkers_count, uiState.stalkers.size))
+                                }
+                            } else {
+                                Text(stringResource(Res.string.stalkers_count, uiState.stalkers.size))
+                            }
+                        },
+                    )
+                }
+            }
+
+            if (uiState.isLoading) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
+            } else if (uiState.selectedTab == FollowTab.STALKERS) {
+                // Stalkers tab content — SuperShy only
+                if (!uiState.isSuperShy) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.padding(32.dp),
+                        ) {
+                            Text(
+                                text = stringResource(Res.string.super_shy_benefit),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            Text(
+                                text = stringResource(Res.string.stalkers_super_shy_description),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            )
+                            androidx.compose.material3.FilledTonalButton(
+                                onClick = onNavigateToSuperShy,
+                            ) {
+                                Text(stringResource(Res.string.get_super_shy))
+                            }
+                        }
+                    }
+                } else if (uiState.stalkers.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = stringResource(Res.string.no_profile_visitors),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        items(uiState.stalkers, key = { it.visitorId }) { visitor ->
+                            val visitorUser = uiState.stalkerUsers[visitor.visitorId]
+                            val isNew = visitor.lastVisitedAt > uiState.stalkersLastViewedAt
+                            StalkerUserRow(
+                                visitor = visitor,
+                                user = visitorUser,
+                                isNew = isNew,
+                                aliases = uiState.aliases,
+                                onClick = { onNavigateToUserProfile(visitor.visitorId) },
+                            )
+                        }
+                    }
+                }
+            } else {
+                val users by remember {
+                    derivedStateOf {
+                        when (uiState.selectedTab) {
+                            FollowTab.FOLLOWERS -> uiState.followers
+                            FollowTab.FOLLOWING -> uiState.following
+                            FollowTab.STALKERS -> emptyList()
+                        }
+                    }
+                }
+
+                if (uiState.followingHidden && uiState.selectedTab == FollowTab.FOLLOWING) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = stringResource(Res.string.following_list_private),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else if (users.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text =
+                                if (uiState.selectedTab == FollowTab.FOLLOWERS) {
+                                    stringResource(Res.string.no_followers_yet)
+                                } else {
+                                    stringResource(Res.string.not_following_anyone)
+                                },
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        items(users, key = { it.uid }) { user ->
+                            FollowUserRow(
+                                user = user,
+                                isOwnList = uiState.isOwnList,
+                                selectedTab = uiState.selectedTab,
+                                iFollowThisUser = user.uid in uiState.currentUserFollowingIds,
+                                thisUserFollowsMe = user.uid in uiState.currentUserFollowerIds,
+                                isPendingRemove = user.uid == uiState.pendingRemoveFollowerId,
+                                onToggleFollow = { viewModel.toggleFollow(user.uid) },
+                                onRemoveFollower = { viewModel.removeFollower(user.uid) },
+                                onUndoRemove = { viewModel.undoRemoveFollower() },
+                                aliases = uiState.aliases,
+                                onClick = { onNavigateToUserProfile(user.uid) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Suppress("kotlin:S107", "kotlin:S3776")
+@Composable
+private fun FollowUserRow(
+    user: User,
+    isOwnList: Boolean,
+    selectedTab: FollowTab,
+    iFollowThisUser: Boolean,
+    thisUserFollowsMe: Boolean,
+    isPendingRemove: Boolean = false,
+    onToggleFollow: () -> Unit,
+    onRemoveFollower: () -> Unit = {},
+    onUndoRemove: () -> Unit = {},
+    aliases: Map<String, String> = emptyMap(),
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        // Avatar
+        val photoUrl = user.photoUrl
+        if (photoUrl != null) {
+            AsyncImage(
+                model = photoUrl,
+                contentDescription = user.displayName,
+                modifier =
+                    Modifier
+                        .size(48.dp)
+                        .clip(CircleShape),
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            Surface(
+                modifier = Modifier.size(48.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer,
+            ) {
+                Icon(
+                    Icons.Default.Person,
+                    contentDescription = null,
+                    modifier = Modifier.padding(12.dp),
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+        }
+
+        // Name
+        Column(modifier = Modifier.weight(1f)) {
+            val unknownText = stringResource(Res.string.unknown)
+            val resolvedName = aliases[user.uid] ?: user.displayName.ifEmpty { unknownText }
+            StyledDisplayName(
+                displayName = resolvedName,
+                isSuperShy = user.isSuperShy,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+        }
+
+        // Action buttons (only on own lists)
+        if (isOwnList) {
+            when (selectedTab) {
+                FollowTab.FOLLOWING -> {
+                    IconButton(onClick = onToggleFollow) {
+                        val icon =
+                            when {
+                                !iFollowThisUser -> Icons.Default.PersonAdd
+                                thisUserFollowsMe -> Icons.Default.People
+                                else -> Icons.Default.Person
+                            }
+                        Icon(
+                            imageVector = icon,
+                            contentDescription =
+                                if (iFollowThisUser) {
+                                    stringResource(
+                                        Res.string.unfollow,
+                                    )
+                                } else {
+                                    stringResource(Res.string.follow)
+                                },
+                            tint =
+                                if (iFollowThisUser) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                        )
+                    }
+                }
+
+                FollowTab.FOLLOWERS -> {
+                    // Follow back button
+                    IconButton(onClick = onToggleFollow) {
+                        Icon(
+                            imageVector =
+                                if (iFollowThisUser) {
+                                    Icons.Default.People
+                                } else {
+                                    Icons.Default.PersonAdd
+                                },
+                            contentDescription =
+                                if (iFollowThisUser) {
+                                    stringResource(
+                                        Res.string.unfollow,
+                                    )
+                                } else {
+                                    stringResource(Res.string.follow_back)
+                                },
+                            tint =
+                                if (iFollowThisUser) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                        )
+                    }
+                    // Remove follower / Undo button
+                    if (isPendingRemove) {
+                        IconButton(onClick = onUndoRemove) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Undo,
+                                contentDescription = stringResource(Res.string.undo_remove),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    } else {
+                        IconButton(onClick = onRemoveFollower) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = stringResource(Res.string.remove_follower),
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                }
+
+                FollowTab.STALKERS -> Unit
+            }
+        }
+    }
+}
+
+@Composable
+private fun StalkerUserRow(
+    visitor: ProfileVisitor,
+    user: User?,
+    isNew: Boolean,
+    aliases: Map<String, String> = emptyMap(),
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        // Avatar
+        val photoUrl = user?.photoUrl
+        if (photoUrl != null) {
+            AsyncImage(
+                model = photoUrl,
+                contentDescription = user.displayName,
+                modifier =
+                    Modifier
+                        .size(48.dp)
+                        .clip(CircleShape),
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            Surface(
+                modifier = Modifier.size(48.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer,
+            ) {
+                Icon(
+                    Icons.Default.Person,
+                    contentDescription = null,
+                    modifier = Modifier.padding(12.dp),
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+        }
+
+        // Name and visit count
+        Column(modifier = Modifier.weight(1f)) {
+            val unknownText = stringResource(Res.string.unknown)
+            val resolvedName =
+                aliases[visitor.visitorId]
+                    ?: user?.displayName?.ifEmpty { null }
+                    ?: unknownText
+            StyledDisplayName(
+                displayName = resolvedName,
+                isSuperShy = user?.isSuperShy == true,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            val timeStrings = rememberRelativeTimeStrings()
+            val agoText =
+                remember(visitor.lastVisitedAt) {
+                    formatRelativeTime(visitor.lastVisitedAt, timeStrings)
+                }
+            Text(
+                text = stringResource(Res.string.stalker_visit_info, agoText, visitor.visitCount),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        // New indicator dot
+        if (isNew) {
+            Box(
+                modifier =
+                    Modifier
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.error),
+            )
+        }
+    }
+}

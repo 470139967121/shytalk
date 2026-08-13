@@ -1,0 +1,79 @@
+name: Force Cancel All Runs
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  force-cancel:
+    name: Force Cancel All Runs
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Force-cancel all non-completed workflow runs
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const workflows = ['release.yml', 'pr-checks.yml', 'deploy-dev.yml', 'deploy-prod.yml', 'e2e-tests.yml', 'playwright-tests.yml'];
+
+            for (const wf of workflows) {
+              for (const status of ['waiting', 'in_progress', 'queued', 'pending']) {
+                const { data: runs } = await github.rest.actions.listWorkflowRuns({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id: wf,
+                  status,
+                });
+
+                for (const run of runs.workflow_runs) {
+                  if (run.id === context.runId) continue;
+
+                  // Reject any pending deployment approvals
+                  try {
+                    const { data: deployments } = await github.rest.actions.getPendingDeploymentsForRun({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      run_id: run.id,
+                    });
+                    for (const dep of deployments) {
+                      await github.rest.actions.reviewPendingDeploymentsForRun({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        run_id: run.id,
+                        environment_ids: [dep.environment.id],
+                        state: 'rejected',
+                        comment: 'Force-cancelled via workflow dispatch',
+                      });
+                    }
+                  } catch (err) { /* no pending deployments */ }
+
+                  // Force-cancel the run (uses force-cancel API, not the polite cancel)
+                  try {
+                    await github.request('POST /repos/{owner}/{repo}/actions/runs/{run_id}/force-cancel', {
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      run_id: run.id,
+                    });
+                    console.log(`[${wf}] Force-cancelled run ${run.id} (was ${status})`);
+                  } catch (err) {
+                    // Fallback to polite cancel if force-cancel not available
+                    try {
+                      await github.rest.actions.cancelWorkflowRun({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        run_id: run.id,
+                      });
+                      console.log(`[${wf}] Cancelled run ${run.id} via fallback (was ${status})`);
+                    } catch (err2) {
+                      console.log(`[${wf}] Could not cancel run ${run.id}: ${err2.message}`);
+                    }
+                  }
+                }
+              }
+            }
+            console.log('Done — all stale runs cancelled.');

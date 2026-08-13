@@ -1,0 +1,1022 @@
+name: Deploy To Prod
+# Deploy a release tag, branch, or commit hash to production.
+#
+# Default behavior preserved: when ref-type=tag, this works exactly
+# like the old `release-tag` input. branch/commit deploy is new and
+# allows hotfix workflows that don't go through the Release tag flow.
+#
+# All downstream jobs receive a canonical commit SHA from
+# validate-release.outputs.commit-sha, so a push to the source branch
+# between jobs can't produce a racy split-SHA deploy.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref-type:
+        description: 'What kind of ref to deploy'
+        type: choice
+        options:
+          - tag
+          - branch
+          - commit
+        default: tag
+        required: true
+      ref:
+        description: 'Tag (e.g. v0.55.0), branch name, or full 40-char commit SHA'
+        type: string
+        required: true
+      allow-non-main:
+        description: 'Allow deploying refs NOT on main (emergency hotfix branches; default off — safer)'
+        type: boolean
+        default: false
+      backend:
+        description: 'Deploy Express API to prod'
+        type: boolean
+        default: true
+      web:
+        description: 'Deploy web to prod'
+        type: boolean
+        default: true
+      android:
+        description: 'Build + upload to Play Store'
+        type: boolean
+        default: true
+      ios:
+        description: 'Build + upload to App Store'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  validate-release:
+    name: Validate Deploy Ref
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      commit-sha: ${{ steps.validate.outputs.commit-sha }}
+      version: ${{ steps.validate.outputs.version }}
+      display-ref: ${{ steps.validate.outputs.display-ref }}
+    steps:
+      # Checkout default branch HEAD with full history — the validate
+      # step uses git plumbing to resolve the requested ref to a
+      # canonical commit SHA. We deliberately do NOT pin `ref:` to the
+      # input here, because a) for branch refs we need `origin/<branch>`
+      # not the raw name, and b) the working tree contents don't matter
+      # at this step — only git history does.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Resolve ref to canonical commit SHA + validate
+        id: validate
+        env:
+          REF_TYPE: ${{ inputs.ref-type }}
+          REF: ${{ inputs.ref }}
+          ALLOW_NON_MAIN: ${{ inputs.allow-non-main }}
+        run: |
+          set -euo pipefail
+          case "$REF_TYPE" in
+            tag)
+              if ! git tag -l "$REF" | grep -qx "$REF"; then
+                echo "::error::Tag '$REF' does not exist"
+                exit 1
+              fi
+              COMMIT_SHA=$(git rev-parse "refs/tags/$REF^{commit}")
+              # Tag-derived version: strip leading 'v' (existing convention).
+              VERSION="${REF#v}"
+              DISPLAY="$REF"
+              ;;
+            branch)
+              if ! git rev-parse --verify "refs/remotes/origin/$REF" >/dev/null 2>&1; then
+                echo "::error::Branch '$REF' does not exist on origin"
+                exit 1
+              fi
+              COMMIT_SHA=$(git rev-parse "refs/remotes/origin/$REF^{commit}")
+              # Branch deploys don't have a corresponding semver tag, so
+              # parse versionName from app/build.gradle.kts at that commit.
+              # This drives iOS CFBundleShortVersionString + Play release
+              # name (see deploy-android-prod / deploy-ios-prod).
+              VERSION=$(git show "$COMMIT_SHA:app/build.gradle.kts" | awk -F'"' '/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"/ {print $2; exit}')
+              if [ -z "$VERSION" ]; then
+                echo "::error::Could not parse versionName from app/build.gradle.kts at $COMMIT_SHA"
+                exit 1
+              fi
+              DISPLAY="branch $REF @ ${COMMIT_SHA:0:7}"
+              ;;
+            commit)
+              if ! echo "$REF" | grep -qE '^[0-9a-f]{40}$'; then
+                echo "::error::Commit input must be a full 40-char hex SHA (got '$REF'). Short SHAs are ambiguous and aren't supported here."
+                exit 1
+              fi
+              if ! git cat-file -e "$REF^{commit}" 2>/dev/null; then
+                echo "::error::Commit $REF does not exist in this repo (did you forget to push?)"
+                exit 1
+              fi
+              COMMIT_SHA="$REF"
+              VERSION=$(git show "$COMMIT_SHA:app/build.gradle.kts" | awk -F'"' '/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"/ {print $2; exit}')
+              if [ -z "$VERSION" ]; then
+                echo "::error::Could not parse versionName from app/build.gradle.kts at $COMMIT_SHA"
+                exit 1
+              fi
+              DISPLAY="commit ${COMMIT_SHA:0:7}"
+              ;;
+            *)
+              echo "::error::Invalid ref-type '$REF_TYPE' (expected: tag | branch | commit)"
+              exit 1
+              ;;
+          esac
+
+          # Prod hygiene: by default, refuse to deploy code that's not
+          # already on main. The operator can bypass this for emergency
+          # hotfix branches by setting allow-non-main=true at dispatch
+          # time. When bypassed, print a loud warning so the run log
+          # makes the choice visible during post-deploy review.
+          if [ "$ALLOW_NON_MAIN" = "true" ]; then
+            if ! git merge-base --is-ancestor "$COMMIT_SHA" origin/main; then
+              echo "::warning::$DISPLAY ($COMMIT_SHA) is NOT on origin/main — deploying off-main code at operator's explicit request (allow-non-main=true). iOS CFBundleVersion may collide with previously-uploaded TestFlight builds if versionCode wasn't bumped at this ref."
+            else
+              echo "Note: allow-non-main=true was set but $DISPLAY is on main anyway — no effect."
+            fi
+          else
+            if ! git merge-base --is-ancestor "$COMMIT_SHA" origin/main; then
+              echo "::error::$DISPLAY ($COMMIT_SHA) is not an ancestor of origin/main. Refusing to deploy off-main code to prod. Re-trigger with allow-non-main=true to bypass (intended for emergency hotfix branches)."
+              exit 1
+            fi
+          fi
+
+          {
+            echo "commit-sha=$COMMIT_SHA"
+            echo "version=$VERSION"
+            echo "display-ref=$DISPLAY"
+          } >> "$GITHUB_OUTPUT"
+          echo "Deploying $DISPLAY (commit $COMMIT_SHA, version $VERSION)"
+
+  # ── Build Android (shared by deploy + smoke test) ──────────
+  build-android:
+    name: Build Android
+    # SHY-0084 note: intentionally NOT gated on `approve-prod`. This job only
+    # BUILDS + signs artifacts (it does not deploy) — publication to Play Store
+    # is gated on the deploy-android-prod job, which DOES need approve-prod. The
+    # signing key is used by trusted CI either way; the gate controls SHIPPING,
+    # not signing. Building during the approval wait (rather than after) keeps
+    # the post-approval deploy fast — important for queued/overnight releases
+    # where the artifact is ready by the time the operator clicks approve.
+    # Behaviour unchanged from the pre-SHY-0084 design (the old per-platform
+    # gates were on the deploy jobs, never on this build).
+    needs: [validate-release]
+    if: inputs.android
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.validate-release.outputs.commit-sha }}
+
+      - uses: ./.github/actions/setup-jdk-gradle
+
+      - uses: ./.github/actions/decode-google-services
+        with:
+          dev-base64: ${{ secrets.GOOGLE_SERVICES_DEV_BASE64 }}
+          prod-base64: ${{ secrets.GOOGLE_SERVICES_PROD_BASE64 }}
+
+      - uses: ./.github/actions/decode-keystore
+        with:
+          keystore-base64: ${{ secrets.KEYSTORE_BASE64 }}
+
+      - name: Build prodRelease (AAB + APK) and prodDebug APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          LIVEKIT_URL: ${{ secrets.LIVEKIT_URL }}
+        run: ./gradlew assembleProdRelease bundleProdRelease assembleProdDebug --parallel
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: android-prod-release
+          path: |
+            app/build/outputs/bundle/prodRelease/*.aab
+            app/build/outputs/apk/prod/release/*.apk
+            app/src/main/play/release-notes/
+          retention-days: 3
+
+      - name: Upload debug APK for smoke test
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: android-prod-debug
+          path: app/build/outputs/apk/prod/debug/*.apk
+          retention-days: 3
+
+  # ── Deploy jobs ────────────────────────────────────────────
+  approve-prod:
+    name: Approve Prod Release
+    # SHY-0084: the SINGLE manual approval gate for the entire prod deploy.
+    # Replaces the four per-platform `environment: prod-*` gates (one release
+    # used to need four approval clicks). Every deploy job below `needs:` this
+    # job AND checks `needs.approve-prod.result == 'success'` in its `if:`, so
+    # ONE approval of the protected `production` environment unlocks backend +
+    # web + android + ios — and a DENIED approval (this job fails) blocks all
+    # four, even though they use `always()` for selective-platform logic.
+    # `production` is the pre-existing protected environment (required reviewer:
+    # the repo owner); no per-platform environment is auto-created un-gated.
+    needs: [validate-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    steps:
+      - name: Record approval
+        env:
+          DEPLOY_SHA: ${{ needs.validate-release.outputs.commit-sha || github.sha }}
+        run: echo "Production release approved for $DEPLOY_SHA"
+
+  deploy-backend-prod:
+    name: Deploy Backend to Prod
+    # SHY-0084: gated by the single `approve-prod` job above (no own
+    # environment). `needs: approve-prod` (no `always()` here) means a denied
+    # approval auto-skips this first deploy.
+    needs: [validate-release, approve-prod]
+    if: inputs.backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.validate-release.outputs.commit-sha }}
+
+      - uses: ./.github/actions/setup-node
+
+      - name: Install deploy tools
+        run: npm install -g firebase-tools
+
+      - name: Set up SSH
+        env:
+          SSH_KEY: ${{ secrets.SINGAPORE_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan 213.35.98.160 >> ~/.ssh/known_hosts
+
+      - name: Archive previous API version
+        run: ssh ubuntu@213.35.98.160 "cd ~/shytalk-api && tar czf /tmp/api-previous.tar.gz --exclude='node_modules' --exclude='.env' ."
+
+      - name: Deploy Express API to Singapore (prod)
+        env:
+          DEPLOYED_SHA: ${{ needs.validate-release.outputs.commit-sha }}
+        run: |
+          set -euo pipefail
+          cd express-api
+          tar czf /tmp/api.tar.gz --exclude='node_modules' --exclude='.env' .
+          scp /tmp/api.tar.gz ubuntu@213.35.98.160:/tmp/
+          # See deploy-dev.yml for rationale on .deployed-sha + pm2 --update-env.
+          # We use the validate-release output (canonical commit SHA the deploy
+          # was authorised for) rather than `github.sha`. The latter resolves to
+          # the workflow's trigger commit (default-branch HEAD at dispatch
+          # time), which for branch/commit deploys is NOT the same as the
+          # checked-out deploy ref — using it would write a misleading SHA to
+          # .deployed-sha and pass the health check while serving different code.
+          #
+          # Build the remote-side deploy script LOCALLY (with the SHA baked
+          # in via the env-block expansion), then scp + exec. Mirrors
+          # deploy-dev.yml: splits local-expansion from the ssh invocation
+          # so neither shellcheck SC2029 (client-side ssh-string expansion)
+          # nor SC2087 (heredoc expansion locale) fires — the local heredoc
+          # is the only place expansion happens, which is exactly its
+          # purpose.
+          cat > /tmp/deploy-remote.sh <<EOF
+          set -e
+          cd ~/shytalk-api && tar xzf /tmp/api.tar.gz
+          echo '${DEPLOYED_SHA}' > .deployed-sha
+          npm install --omit=dev
+          DEPLOYED_SHA='${DEPLOYED_SHA}' pm2 restart shytalk-api --update-env
+          EOF
+          scp /tmp/deploy-remote.sh ubuntu@213.35.98.160:/tmp/
+          ssh ubuntu@213.35.98.160 'bash /tmp/deploy-remote.sh'
+
+      - name: Verify prod API health
+        run: |
+          set -euo pipefail
+          EXPECTED_SHA='${{ needs.validate-release.outputs.commit-sha }}'
+          for i in 1 2 3 4 5; do
+            sleep 5
+            body=$(curl -sf -m 10 https://api.shytalk.shyden.co.uk/api/health || echo "")
+            if [ -z "$body" ]; then
+              echo "Health check attempt $i: curl failed, retrying..."
+              continue
+            fi
+            echo "$body"
+            # See deploy-dev.yml for rationale on the SHA assertion.
+            if echo "$body" | grep -q "\"sha\":\"$EXPECTED_SHA\""; then
+              echo "Health check passed — deployed SHA $EXPECTED_SHA is serving"
+              exit 0
+            fi
+            echo "Health check attempt $i: SHA mismatch (expected $EXPECTED_SHA), retrying..."
+          done
+          echo "::error::Prod API health check failed after 5 attempts — deployed code may not be running"
+          exit 1
+
+      - uses: ./.github/actions/deploy-firebase-rules
+        with:
+          service-account-json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_PROD }}
+          firebase-project: shytalk-7ba69
+
+  deploy-web-prod:
+    name: Deploy Web to Prod
+    # Gate web on backend success — same rationale as deploy-dev.yml
+    # (incident 2026-05-03 run 25276782190 where web shipped with a
+    # broken backend deploy and testers got a working-looking site
+    # whose every API call errored). Prod stakes are higher than dev.
+    # SHY-0084: + approve-prod (the single gate); no own environment.
+    needs: [validate-release, approve-prod, deploy-backend-prod]
+    # Allow `success` OR `skipped` — `skipped` covers the legitimate
+    # `inputs.backend=false` web-only redeploy. Block only on `failure`
+    # / `cancelled` so a crashed backend can't ship a working-looking
+    # client (incident 2026-05-03 run 25276782190).
+    # See deploy-dev.yml deploy-web-dev for `always()` + allowlist
+    # rationale (run 25280868804 — implicit "needs success" gate skips
+    # dependent jobs whenever upstream is `skipped`, even when explicit
+    # `if:` checks for `result == 'skipped'`).
+    # The explicit `approve-prod.result == 'success'` keeps the gate
+    # enforced under always() (a denied approval blocks this deploy).
+    if: |
+      always() &&
+      inputs.web &&
+      needs.approve-prod.result == 'success' &&
+      (needs.deploy-backend-prod.result == 'success' || needs.deploy-backend-prod.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.validate-release.outputs.commit-sha }}
+
+      - uses: ./.github/actions/setup-node
+
+      - name: Install deploy tools
+        run: npm install -g wrangler
+
+      - name: Deploy web to prod site
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: '9315582c39b627dca58dfa83602db385'
+          PROD_FIREBASE_API_KEY: ${{ secrets.PROD_FIREBASE_API_KEY }}
+        run: |
+          sed "s|<PROD_FIREBASE_API_KEY>|$PROD_FIREBASE_API_KEY|" public/admin/config.example.js > public/admin/config.js
+          sed "s|<PROD_FIREBASE_API_KEY>|$PROD_FIREBASE_API_KEY|" public/portal/config.example.js > public/portal/config.js
+          sed "s|<PROD_FIREBASE_API_KEY>|$PROD_FIREBASE_API_KEY|" public/js/roadmap-config.example.js > public/js/roadmap-config.js
+          wrangler pages deploy public --project-name shytalk-site --branch main
+
+  deploy-android-prod:
+    name: Deploy Android to Play Store
+    # Gate Android on backend success — see deploy-web-prod for the
+    # rationale. Pushing a broken-backend build to Play Store would
+    # be visible to every prod user on next app open.
+    # SHY-0084: + approve-prod (the single gate); no own environment.
+    needs: [validate-release, approve-prod, build-android, deploy-backend-prod]
+    # See deploy-web-prod for `success || skipped` rationale.
+    # See deploy-web-prod / deploy-dev.yml for `always()` + allowlist rationale.
+    # The explicit `approve-prod.result == 'success'` keeps the gate enforced
+    # under always() (a denied approval blocks this deploy).
+    if: |
+      always() &&
+      inputs.android &&
+      needs.approve-prod.result == 'success' &&
+      (needs.deploy-backend-prod.result == 'success' || needs.deploy-backend-prod.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: android-prod-release
+          path: android-release
+
+      - name: Verify AAB present
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          aabs=(android-release/build/outputs/bundle/prodRelease/*.aab)
+          shopt -u nullglob
+          if [ "${#aabs[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one .aab in android-release/build/outputs/bundle/prodRelease/, got ${#aabs[@]}"
+            find android-release -type f
+            exit 1
+          fi
+          echo "AAB present: ${aabs[0]} ($(du -h "${aabs[0]}" | cut -f1))"
+
+      - name: Upload to Play Store internal testing track
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.shyden.shytalk
+          releaseFiles: android-release/build/outputs/bundle/prodRelease/*.aab
+          track: internal
+          status: draft
+          releaseName: ${{ needs.validate-release.outputs.version }}
+          whatsNewDirectory: android-release/src/main/play/release-notes
+
+  deploy-ios-prod:
+    name: Deploy iOS to App Store
+    # Gate iOS on backend success — see deploy-web-prod for the
+    # rationale. Apple App Store review pulls and exercises the binary
+    # against the live backend; a broken-backend build risks rejection.
+    # SHY-0084: + approve-prod (the single gate); no own environment.
+    needs: [validate-release, approve-prod, deploy-backend-prod]
+    # See deploy-web-prod for `success || skipped` rationale.
+    # See deploy-web-prod / deploy-dev.yml for `always()` + allowlist rationale.
+    # The explicit `approve-prod.result == 'success'` keeps the gate enforced
+    # under always() (a denied approval blocks this deploy).
+    if: |
+      always() &&
+      inputs.ios &&
+      needs.approve-prod.result == 'success' &&
+      (needs.deploy-backend-prod.result == 'success' || needs.deploy-backend-prod.result == 'skipped')
+    # Migrated 2026-05-20 from self-hosted Mac (shytalk-mac) to GitHub-hosted
+    # macos-latest per the no-self-hosted-runners policy. See deploy-dev.yml
+    # for full rationale.
+    runs-on: macos-latest
+    # Tuned 2026-05-21 to 100 min. See deploy-dev.yml's distribute-ios
+    # timeout comment for the full reasoning (gradle daemon collision was
+    # the real cause of the apparent slowness, not insufficient minutes).
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.validate-release.outputs.commit-sha }}
+
+      # Pre-cleanup: scrub any signing material left behind by a PRIOR
+      # crashed run on the persistent self-hosted Mac. See deploy-dev.yml
+      # for the full rationale. Idempotent.
+      - name: Pre-cleanup leftovers from prior crashed runs
+        uses: ./.github/actions/cleanup-ios-signing
+        with:
+          app-store-connect-key-id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+
+      # Fast pre-flight: assert the export plist hasn't been flipped back to
+      # `destination: upload` (which would upload silently and break TestFlight,
+      # as happened 2026-03-12 → 2026-04-29). Fails in <1s before we burn 20 min
+      # on archive + export.
+      - name: Assert ExportOptions.plist requires local export
+        run: |
+          set -euo pipefail
+          dest=$(/usr/libexec/PlistBuddy -c "Print :destination" iosApp/ExportOptions.plist)
+          if [ "$dest" != "export" ]; then
+            echo "::error::iosApp/ExportOptions.plist destination must be 'export' (got '$dest'). 'upload' uploads silently during exportArchive and writes no local IPA, breaking the next step."
+            exit 1
+          fi
+
+      - uses: ./.github/actions/setup-jdk-gradle
+
+      - uses: ./.github/actions/setup-ios-signing
+        with:
+          certificate-base64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          certificate-password: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          provision-profile-base64: ${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}
+          app-store-connect-key: ${{ secrets.APP_STORE_CONNECT_KEY }}
+          app-store-connect-key-id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+
+      - uses: ./.github/actions/decode-google-services
+        with:
+          dev-base64: ${{ secrets.GOOGLE_SERVICES_DEV_BASE64 }}
+          prod-base64: ${{ secrets.GOOGLE_SERVICES_PROD_BASE64 }}
+
+      # See deploy-dev.yml's matching step for rationale — ~/.konan is the
+      # only big iOS-relevant cache that setup-gradle doesn't cover.
+      # Split into restore (here) + save (at job tail) per ios-tests.yml
+      # PR #951's pattern — combined actions/cache's synthetic POST save
+      # can hang past timeout-minutes when GitHub's cache backend is slow.
+      - name: Restore Kotlin/Native cache (~/.konan)
+        id: konan-cache-restore
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: |
+            konan-${{ runner.os }}-
+
+      - name: Build KMP shared framework for iOS
+        run: |
+          set -euo pipefail
+          # See deploy-dev.yml's matching step — --max-workers=1 avoids the
+          # parallel K/N link deadlock; also pre-build Debug so xcodebuild's
+          # nested gradle call finds it UP-TO-DATE.
+          ./gradlew :shared:linkReleaseFrameworkIosArm64 :shared:linkDebugFrameworkIosArm64 --max-workers=1
+
+      - name: Install CocoaPods
+        run: |
+          set -euo pipefail
+          cd iosApp
+          pod install
+
+      # Mirror of deploy-dev.yml's pre-xcodebuild daemon stop. See that file
+      # for the full forensic explanation (run 26196249351 hang analysis).
+      # Same gradle-daemon collision pattern would hit prod releases too.
+      - name: Stop gradle daemon before xcodebuild
+        run: ./gradlew --stop
+
+      # Step-level hang detector — see deploy-dev.yml's matching step for
+      # the rationale. 50-min cap catches recurrence cheaply.
+      - name: Build and archive iOS app
+        timeout-minutes: 50
+        run: |
+          set -euo pipefail
+          # Read the bumped versionCode/versionName from app/build.gradle.kts
+          # (set by the manual Release workflow) and feed both into the iOS
+          # archive as build settings. Without this, iOS prod stayed at the
+          # static `1` / `1.0` baked into project.pbxproj while Android
+          # correctly reflected the release version — breaking parity and
+          # eventually colliding with previously-uploaded TestFlight builds.
+          # Anchor the awk patterns so doc comments containing the same
+          # words don't get parsed as values.
+          VERSION_CODE=$(awk '/^[[:space:]]*versionCode[[:space:]]*=[[:space:]]*[0-9]+/ {gsub(/[^0-9]/,"",$3); print $3; exit}' app/build.gradle.kts)
+          VERSION_NAME=$(awk -F'"' '/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"/ {print $2; exit}' app/build.gradle.kts)
+          if [ -z "$VERSION_CODE" ] || [ -z "$VERSION_NAME" ]; then
+            echo "::error::Could not parse versionCode/versionName from app/build.gradle.kts"
+            exit 1
+          fi
+          if ! echo "$VERSION_NAME" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::versionName '$VERSION_NAME' is not a strict 3-int semver (Apple's CFBundleShortVersionString rule)"
+            exit 1
+          fi
+          echo "Archiving iOS as v${VERSION_NAME} (build ${VERSION_CODE}) — matches Android"
+          cd iosApp
+          # The app's Release config is manual-signed for App Store distribution
+          # PER-TARGET in project.pbxproj, NOT via global xcodebuild build
+          # settings — those would hit the SwiftPM resource bundles
+          # (SwiftProtobuf_SwiftProtobuf / LiveKit_LiveKit) which can't hold a
+          # profile → exit 65. An App Store profile needs no devices (avoids the
+          # automatic "team has no devices" failure). DEVELOPMENT_TEAM lets the
+          # SPM bundles sign with the team identity. See deploy-dev.yml for the
+          # full rationale. -exportArchive exports via ExportOptions.plist.
+          xcodebuild \
+            -workspace iosApp.xcworkspace \
+            -scheme iosApp \
+            -sdk iphoneos \
+            -configuration Release \
+            -showBuildTimingSummary \
+            -archivePath "$RUNNER_TEMP/iosApp.xcarchive" \
+            DEVELOPMENT_TEAM=F3XX4PM3MF \
+            CURRENT_PROJECT_VERSION="${VERSION_CODE}" \
+            MARKETING_VERSION="${VERSION_NAME}" \
+            archive
+
+      - name: Export IPA
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          cd iosApp
+          xcodebuild \
+            -exportArchive \
+            -archivePath "$RUNNER_TEMP/iosApp.xcarchive" \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath "$RUNNER_TEMP/export" \
+            -authenticationKeyPath "$RUNNER_TEMP/private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8" \
+            -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
+            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
+          # Verify a single IPA was produced (catches `destination: upload` regressions
+          # that uploaded silently and left no local artifact, breaking the next step)
+          shopt -s nullglob
+          ipas=("$RUNNER_TEMP/export"/*.ipa)
+          shopt -u nullglob
+          if [ "${#ipas[@]}" -eq 0 ]; then
+            echo "::error::xcodebuild -exportArchive completed but no .ipa was written to $RUNNER_TEMP/export/. Check ExportOptions.plist (destination must be 'export', not 'upload')."
+            ls -la "$RUNNER_TEMP/export/" 2>&1 || true
+            exit 1
+          fi
+          if [ "${#ipas[@]}" -gt 1 ]; then
+            echo "::error::Expected exactly one .ipa, found ${#ipas[@]}: ${ipas[*]}"
+            exit 1
+          fi
+          echo "Exported IPA: ${ipas[0]} ($(du -h "${ipas[0]}" | cut -f1))"
+
+      - name: Upload to App Store Connect
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          ipas=("$RUNNER_TEMP/export"/*.ipa)
+          shopt -u nullglob
+          # Post-export step already verified exactly one IPA exists. Re-glob is
+          # only needed to populate ipas[0] for altool's -f arg.
+          # altool is famous for printing product-errors to stdout while exiting 0
+          # (auth-key revoked, asset validation rejection, etc). Capture output
+          # and grep it so we fail loudly when ASC reports an upload-time error.
+          # `set -o pipefail` (already on from `set -euo pipefail`) makes a
+          # non-zero altool exit propagate through the `tee` pipe, so we don't
+          # need PIPESTATUS gymnastics — set -e aborts before the grep runs.
+          upload_log="$RUNNER_TEMP/altool-upload.log"
+          xcrun altool --upload-app \
+            -f "${ipas[0]}" \
+            -t ios \
+            --apiKey "$APP_STORE_CONNECT_KEY_ID" \
+            --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID" \
+            --output-format xml 2>&1 | tee "$upload_log"
+          if grep -qE '<key>product-errors</key>|<key>tool-errors</key>' "$upload_log"; then
+            echo "::error::altool reported errors despite exit 0 — see log above"
+            exit 1
+          fi
+          echo "altool upload accepted by App Store Connect"
+
+      - name: Ensure TestFlight internal-group auto-distribution
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        # See deploy-dev.yml for rationale. Same script, same idempotent shape.
+        run: node scripts/ensure-testflight-auto-distribution.js
+
+      - name: Clean up signing material
+        if: always()
+        uses: ./.github/actions/cleanup-ios-signing
+        with:
+          app-store-connect-key-id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+
+      # Paired with the Restore Kotlin/Native cache step at the head
+      # of the job. Regular step (NOT a synthetic POST) so timeout-
+      # minutes + continue-on-error actually apply when GitHub's cache
+      # backend hangs mid-upload. See ios-tests.yml PR #951 for full
+      # rationale.
+      - name: Save Kotlin/Native cache (~/.konan)
+        if: always() && steps.konan-cache-restore.outputs.cache-hit != 'true'
+        timeout-minutes: 10
+        continue-on-error: true
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.konan
+          key: ${{ steps.konan-cache-restore.outputs.cache-primary-key }}
+
+  # ── Smoke tests (after deploys) ────────────────────────────
+  # Smoke tests are split per-surface so the GitHub UI status reflects what
+  # each surface deployed: a red deploy-backend-prod next to a green
+  # smoke-test-api was previously misleading (the smoke-test was running
+  # but skipping the backend checks via inner `if:`). Split jobs make
+  # "X deployed AND smoke-tested" the only way the surface is green.
+  smoke-test-api:
+    name: Smoke Test (API)
+    needs: [validate-release, deploy-backend-prod]
+    if: |
+      always() &&
+      needs.validate-release.result == 'success' &&
+      needs.deploy-backend-prod.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify API health
+        run: |
+          echo "=== API Health Check ==="
+          HEALTH=$(curl -sf https://api.shytalk.shyden.co.uk/api/health)
+          echo "$HEALTH"
+          echo "$HEALTH" | grep -q '"status":"ok"' || { echo "::error::Health check failed"; exit 1; }
+
+      - name: Verify API endpoints respond
+        run: |
+          set -euo pipefail
+          echo "=== API Endpoint Checks ==="
+          ERRORS=0
+          # Whitelist expected status per endpoint. Anything else fails the
+          # smoke test — including 404 (route removed), 400 (validation
+          # broke), 403 (auth misconfigured), 429 (rate-limit gone wild).
+          # The previous "anything not 5xx is OK" pattern silently passed
+          # all of those.
+          check() {
+            local endpoint=$1 expected=$2
+            local status
+            # `--max-time 10` caps DNS+connect+TLS+response. `|| echo "000"`
+            # converts curl's exit-on-network-failure (DNS, refused, timeout)
+            # into a sentinel status so the check fails-loud at the same
+            # whitelist comparison as a wrong HTTP code, rather than `set -e`
+            # aborting the whole verification before the FAIL line prints.
+            status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://api.shytalk.shyden.co.uk${endpoint}" || echo "000")
+            if echo "$status" | grep -qE "^(${expected})$"; then
+              echo "OK: ${endpoint} → ${status} (expected ${expected})"
+            else
+              echo "FAIL: ${endpoint} → ${status} (expected ${expected})"
+              ERRORS=$((ERRORS + 1))
+            fi
+          }
+          check "/api/health"            "200"
+          check "/api/users/me"          "401"
+          check "/api/rooms"             "401"
+          check "/api/conversations"     "401"
+          check "/api/admin/alerts"      "401"
+          check "/api/admin/banners"     "401"
+          [ "$ERRORS" -eq 0 ] || { echo "::error::${ERRORS} endpoint(s) returned unexpected status"; exit 1; }
+          echo "All API endpoints responding correctly"
+
+  smoke-test-web:
+    name: Smoke Test (Web)
+    needs: [validate-release, deploy-web-prod]
+    if: |
+      always() &&
+      needs.validate-release.result == 'success' &&
+      needs.deploy-web-prod.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify web landing page
+        run: |
+          echo "=== Web Landing Page ==="
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' "https://shytalk.shyden.co.uk")
+          [ "$STATUS" = "200" ] || { echo "::error::Landing page returned ${STATUS}"; exit 1; }
+          BODY=$(curl -sf "https://shytalk.shyden.co.uk")
+          echo "$BODY" | grep -qi "shytalk" || { echo "::error::Missing ShyTalk content"; exit 1; }
+          echo "Landing page OK"
+
+      - name: Verify admin panel
+        run: |
+          echo "=== Admin Panel ==="
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' "https://shytalk.shyden.co.uk/admin/")
+          [ "$STATUS" = "200" ] || { echo "::error::Admin panel returned ${STATUS}"; exit 1; }
+          echo "Admin panel OK"
+
+  smoke-test-android:
+    name: Smoke Test (Android Boot)
+    needs: [validate-release, build-android, deploy-android-prod]
+    if: |
+      always() &&
+      needs.deploy-android-prod.result == 'success'
+    # PINNED 2026-06-01 to ubuntu-22.04 — same rationale as the
+    # `test-android` job in e2e-tests.yml (see the comment block
+    # there for full provenance). This smoke job uses the IDENTICAL
+    # reactivecircus/android-emulator-runner@v2.37.0 SHA on API 33 +
+    # pixel_6 + x86_64 + google_apis, so it inherits the same
+    # ubuntu-24.04 emulator-boot regression. Failing here would
+    # block a prod release on every cut, which is worse than the
+    # PR-gate impact that triggered the pin. Revisit alongside the
+    # e2e-tests.yml pin when the action ships a release that
+    # documents 24.04 as supported.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      # SHY-0084: check out the repo so the committed bash smoke verifier
+      # (scripts/ci/android-smoke-verify.sh) exists on disk — this job
+      # previously only downloaded the APK artifact, with no working tree.
+      # Do NOT pin `ref:` to the DEPLOYED ref: the verifier is workflow TOOLING
+      # and must come from the workflow's own version (the default checkout ref
+      # = the dispatched branch, main). Pinning the deploy ref broke the smoke
+      # when deploying a tag cut BEFORE this script existed (run 27388236740:
+      # deploying v0.97.12 → "No such file", exit 127). The deployed APP under
+      # test is the downloaded APK artifact, not this checked-out tree.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Download debug APK
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: android-prod-debug
+          path: debug-apk
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Boot emulator and verify app launches
+        uses: reactivecircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a # v2.37.0
+        with:
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          force-avd-creation: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          disable-animations: true
+          # SHY-0084: the verification runs as a committed bash file. The action
+          # executes `script` via /usr/bin/sh (dash), where the previous inline
+          # `set -o pipefail` / `shopt` / arrays aborted on line 1 ("Illegal
+          # option -o pipefail") before installing anything — the emulator
+          # booted but the smoke never ran (prod run 27286731472, 2026-06-10).
+          # `bash <file>` guarantees a bash interpreter; the logic is unit-tested
+          # in tests/scripts/android-smoke-verify.test.js.
+          script: bash "$GITHUB_WORKSPACE/scripts/ci/android-smoke-verify.sh"
+
+  smoke-test-ios:
+    name: Smoke Test (iOS Boot)
+    # SHY-0087: run the iOS boot smoke IN PARALLEL with deploy-ios-prod instead
+    # of serially after it — ~25 min off the post-approval critical path. The
+    # smoke shares NO data with the deploy: it checks out the same source commit
+    # (needs.validate-release.outputs.commit-sha) and rebuilds the simulator app
+    # from scratch, so depending on deploy-ios-prod was only a "skip if the
+    # deploy died" gate, never a data handoff. We gate on approve-prod instead:
+    # the smoke still waits for the single approval (so no expensive macos-latest
+    # runner is burned pre-approval or on a denied release) but now overlaps the
+    # deploy rather than queuing behind it. Trade-off (accepted per the SHY-0086
+    # escalation): a wasted runner on the RARE post-approval deploy FAILURE, in
+    # exchange for ~25 min saved on every successful release — and the smoke
+    # still yields a valid boot signal (it builds from source, not the deployed
+    # IPA). inputs.ios is now checked EXPLICITLY: it is the only thing that skips
+    # the smoke on a non-iOS release (approve-prod runs regardless of platform,
+    # so the old deploy-result gate can no longer stand in for the iOS-deselect
+    # check). No always() — we WANT the default auto-skip when approve-prod is
+    # denied/cancelled.
+    needs: [validate-release, approve-prod]
+    if: inputs.ios && needs.approve-prod.result == 'success'
+    # Migrated 2026-05-20 to GitHub-hosted macos-latest per the
+    # no-self-hosted-runners policy. See deploy-dev.yml for rationale.
+    runs-on: macos-latest
+    # SHY-0084: raised 20 → 45. At 20 min the K/N framework link
+    # (--max-workers=1) + pod install + xcodebuild build consumed the whole
+    # budget on a cold ~/.konan cache and the job was CANCELLED before the
+    # "Boot simulator and verify" step ever ran (prod run 27286731472:
+    # started 17:21:26, cancelled 17:41:49 mid-build). 45 min leaves headroom
+    # for the boot+launch verification even on the cold-cache worst case.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.validate-release.outputs.commit-sha }}
+
+      - uses: ./.github/actions/setup-jdk-gradle
+
+      - uses: ./.github/actions/decode-google-services
+        with:
+          dev-base64: ${{ secrets.GOOGLE_SERVICES_DEV_BASE64 }}
+          prod-base64: ${{ secrets.GOOGLE_SERVICES_PROD_BASE64 }}
+
+      # Mirror of deploy-ios-prod's konan cache. ~/.konan isn't covered by
+      # setup-gradle. Sharing the same cache key across all iOS jobs lets
+      # them all hit the same warm cache once any of them has populated it.
+      # Split restore/save per ios-tests.yml PR #951 — combined POST save
+      # can hang past timeout-minutes.
+      - name: Restore Kotlin/Native cache (~/.konan)
+        id: konan-cache-restore
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: |
+            konan-${{ runner.os }}-
+
+      - name: Build KMP shared framework for iOS Simulator
+        # --max-workers=1 — see deploy-dev.yml's matching step. Same
+        # parallel-K/N-link deadlock would apply on Sim too.
+        run: ./gradlew :shared:linkDebugFrameworkIosSimulatorArm64 --max-workers=1
+
+      - name: Install CocoaPods
+        run: cd iosApp && pod install
+
+      # Same gradle-daemon-collision prevention as distribute-ios — the
+      # smoke-test xcodebuild invocation also triggers the
+      # `Compile Kotlin Framework` build phase that calls gradle, so the
+      # daemon from `Build KMP shared framework for iOS Simulator` above
+      # must be stopped first. See deploy-dev.yml's matching step for
+      # full forensics.
+      - name: Stop gradle daemon before xcodebuild
+        run: ./gradlew --stop
+
+      - name: Build iOS app for simulator
+        run: |
+          cd iosApp
+          xcodebuild build \
+            -workspace iosApp.xcworkspace \
+            -scheme iosApp \
+            -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Boot simulator and verify app launches
+        run: |
+          set -euo pipefail
+          echo "=== Booting simulator ==="
+          DEVICE_ID=$(xcrun simctl create "smoke-test" "iPhone 16")
+          # On the self-hosted Mac, leaked simulators accumulate across jobs.
+          # Trap shutdown+delete on EVERY exit (success, failure, signal) so
+          # we don't depend on the explicit cleanup at the end of the script.
+          trap 'xcrun simctl shutdown "$DEVICE_ID" 2>/dev/null || true; xcrun simctl delete "$DEVICE_ID" 2>/dev/null || true' EXIT
+          xcrun simctl boot "$DEVICE_ID"
+          xcrun simctl bootstatus "$DEVICE_ID"
+
+          echo "=== Locating built app ==="
+          APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "iosApp.app" -path "*/Debug-iphonesimulator/*" -print -quit)
+          if [ -z "$APP_PATH" ]; then
+            APP_PATH=$(find iosApp/build -name "iosApp.app" -path "*Debug-iphonesimulator*" -print -quit)
+          fi
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+            echo "::error::Could not locate iosApp.app build product. Check derivedDataPath of the build step."
+            echo "Searched ~/Library/Developer/Xcode/DerivedData and iosApp/build"
+            xcrun simctl shutdown "$DEVICE_ID" || true
+            exit 1
+          fi
+          echo "App path: $APP_PATH"
+
+          echo "=== Installing app ==="
+          xcrun simctl install "$DEVICE_ID" "$APP_PATH"
+          if ! xcrun simctl get_app_container "$DEVICE_ID" com.shyden.shytalk app >/dev/null 2>&1; then
+            echo "::error::App did not install — get_app_container returned non-zero"
+            xcrun simctl shutdown "$DEVICE_ID" || true
+            exit 1
+          fi
+
+          echo "=== Launching app ==="
+          touch /tmp/smoke-start
+          # simctl launch returns the launched PID on success and non-zero on
+          # failure (e.g., "no eligible application", "code-signing rejected").
+          # Without set -e this used to silently progress to the crash-check
+          # which then "passed" because nothing was running to crash.
+          xcrun simctl launch "$DEVICE_ID" com.shyden.shytalk
+          sleep 10
+
+          echo "=== Checking for crashes ==="
+          CRASH_COUNT=$(find ~/Library/Logs/DiagnosticReports -name "iosApp*" -newer /tmp/smoke-start 2>/dev/null | wc -l | tr -d ' ')
+          if [ "${CRASH_COUNT:-0}" -gt 0 ]; then
+            echo "::error::Found crash report(s)"
+            cat ~/Library/Logs/DiagnosticReports/iosApp* 2>/dev/null | head -30
+            xcrun simctl shutdown "$DEVICE_ID" || true
+            exit 1
+          fi
+
+          echo "No crashes detected — iOS app boots successfully"
+          xcrun simctl shutdown "$DEVICE_ID" || true
+
+      # Paired with the Restore Kotlin/Native cache step at the head
+      # of the job. Regular step (NOT a synthetic POST) so timeout-
+      # minutes + continue-on-error actually apply when GitHub's cache
+      # backend hangs mid-upload. See ios-tests.yml PR #951 for full
+      # rationale.
+      - name: Save Kotlin/Native cache (~/.konan)
+        if: always() && steps.konan-cache-restore.outputs.cache-hit != 'true'
+        timeout-minutes: 10
+        continue-on-error: true
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.konan
+          key: ${{ steps.konan-cache-restore.outputs.cache-primary-key }}
+
+  # ── Alert on failure ───────────────────────────────────────
+  alert-desync:
+    name: Alert - Deploy Failed
+    needs: [validate-release, deploy-backend-prod, deploy-web-prod, deploy-android-prod, deploy-ios-prod, smoke-test-api, smoke-test-web, smoke-test-android, smoke-test-ios]
+    if: |
+      always() &&
+      needs.validate-release.result == 'success' &&
+      (needs.deploy-backend-prod.result == 'failure' ||
+       needs.deploy-web-prod.result == 'failure' ||
+       needs.deploy-android-prod.result == 'failure' ||
+       needs.deploy-ios-prod.result == 'failure' ||
+       needs.smoke-test-api.result == 'failure' ||
+       needs.smoke-test-web.result == 'failure' ||
+       needs.smoke-test-android.result == 'failure' ||
+       needs.smoke-test-ios.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Create critical issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DISPLAY_REF: ${{ needs.validate-release.outputs.display-ref }}
+          COMMIT_SHA: ${{ needs.validate-release.outputs.commit-sha }}
+          BACKEND: ${{ needs.deploy-backend-prod.result }}
+          WEB: ${{ needs.deploy-web-prod.result }}
+          ANDROID: ${{ needs.deploy-android-prod.result }}
+          IOS: ${{ needs.deploy-ios-prod.result }}
+          SMOKE_API: ${{ needs.smoke-test-api.result }}
+          SMOKE_WEB: ${{ needs.smoke-test-web.result }}
+          SMOKE_ANDROID: ${{ needs.smoke-test-android.result }}
+          SMOKE_IOS: ${{ needs.smoke-test-ios.result }}
+        run: |
+          FAILED=""
+          [ "$BACKEND" = "failure" ] && FAILED="${FAILED}- Backend API deploy\n"
+          [ "$WEB" = "failure" ] && FAILED="${FAILED}- Web deploy\n"
+          [ "$ANDROID" = "failure" ] && FAILED="${FAILED}- Android (Play Store)\n"
+          [ "$IOS" = "failure" ] && FAILED="${FAILED}- iOS (App Store)\n"
+          [ "$SMOKE_API" = "failure" ] && FAILED="${FAILED}- Smoke test: API\n"
+          [ "$SMOKE_WEB" = "failure" ] && FAILED="${FAILED}- Smoke test: Web\n"
+          [ "$SMOKE_ANDROID" = "failure" ] && FAILED="${FAILED}- Smoke test: Android boot\n"
+          [ "$SMOKE_IOS" = "failure" ] && FAILED="${FAILED}- Smoke test: iOS boot\n"
+
+          BODY_FILE=$(mktemp)
+          {
+            echo "## Production Deploy Failed"
+            echo ""
+            echo "**Ref:** ${DISPLAY_REF}"
+            echo "**Commit:** ${COMMIT_SHA}"
+            echo "**Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo ""
+            echo "### Failed components"
+            echo -e "$FAILED"
+            echo ""
+            echo "### Immediate action required"
+            echo "1. Check the deploy job logs for the failure reason"
+            echo "2. Fix the issue and re-run deploy-prod with the same ref"
+            echo "3. Verify production matches the expected ref"
+            echo "4. Close this issue once resolved"
+          } > "$BODY_FILE"
+          gh issue create \
+            --title "CRITICAL: Production deploy failed for ${DISPLAY_REF}" \
+            --label "critical,prod-desync" \
+            --body-file "$BODY_FILE"

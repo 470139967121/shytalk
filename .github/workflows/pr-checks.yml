@@ -1,0 +1,466 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write       # needed by e2e/playwright allure-report (gh-pages deploy)
+  checks: write
+  pull-requests: write
+
+concurrency:
+  group: pr-checks-${{ github.head_ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      app_changed: ${{ steps.changes.outputs.app_changed }}
+      android_app_changed: ${{ steps.changes.outputs.android_app_changed }}
+      ios_app_changed: ${{ steps.changes.outputs.ios_app_changed }}
+      backend_changed: ${{ steps.changes.outputs.backend_changed }}
+      web_changed: ${{ steps.changes.outputs.web_changed }}
+      integration_changed: ${{ steps.changes.outputs.integration_changed }}
+      qa_runner_drivers_changed: ${{ steps.changes.outputs.qa_runner_drivers_changed }}
+      workflow_only: ${{ steps.changes.outputs.workflow_only }}
+      skip_android_e2e: ${{ steps.changes.outputs.skip_android_e2e }}
+      skip_ios_e2e: ${{ steps.changes.outputs.skip_ios_e2e }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed paths
+        id: changes
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # Diff entire branch against main — not just the latest push.
+          # This ensures all changes in the PR are detected, even if the
+          # latest push only touches workflow files.
+          MERGE_BASE=$(git merge-base "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")
+          CHANGED=$(git diff --name-only "$MERGE_BASE...${{ github.event.pull_request.head.sha }}")
+          # Granular per-platform app flags (added 2026-05-25 to skip
+          # expensive iOS/Android pipelines when a PR touches only
+          # the other platform). APP is the legacy union flag,
+          # retained for lint/sonarcloud/integration-tests which
+          # cover both platforms; only the heavy build/E2E jobs
+          # gate on the granular ANDROID_APP / IOS_APP flags.
+          ANDROID_APP=false IOS_APP=false APP=false BACKEND=false WEB=false INTEGRATION=false QA_RUNNER_DRIVERS=false OTHER=false
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            case "$file" in
+              # Auto-bumped on every commit by .husky/pre-commit (regenerates
+              # the lastUpdated date from .project/plans/...-roadmap.md). The
+              # file is data-only and does not affect web app behavior, so it
+              # MUST NOT trigger the playwright-web pipeline — otherwise every
+              # commit pays ~40min Playwright cost for a no-op change. Exclude
+              # explicitly before the generic public/* fallthrough.
+              public/roadmap-data.json) ;;
+              public/*.md) WEB=true ;;
+              public/*) WEB=true ;;
+              # Tests under tests/web/ exercise the public/ surface via
+              # Playwright; treat them as web changes so the playwright-web
+              # job runs against the source they're testing. Without this
+              # branch, a PR that ADDS a Playwright test would silently
+              # skip the entire playwright-web pipeline (the test would
+              # only run locally before push, never in CI).
+              tests/web/*|playwright.config.ts|playwright.config.js) WEB=true ;;
+              # Per-platform shared-source classification. ORDER
+              # MATTERS — shell `case` is first-match, so the
+              # specific iosMain/androidMain arms MUST precede the
+              # generic `shared/*` arm. Without this ordering, a
+              # PR that changes only shared/src/iosMain/... would
+              # fall through to `shared/*` and trigger both Android
+              # and iOS pipelines, defeating the speedup.
+              shared/src/iosMain/*) IOS_APP=true; APP=true ;;
+              shared/src/androidMain/*) ANDROID_APP=true; APP=true ;;
+              # commonMain et al affects every platform consumer of
+              # the shared module. Setting both flags is the safe
+              # conservative behaviour.
+              shared/*) ANDROID_APP=true; IOS_APP=true; APP=true ;;
+              # Platform-specific top-level dirs.
+              iosApp/*) IOS_APP=true; APP=true ;;
+              app/*) ANDROID_APP=true; APP=true ;;
+              # Gradle infra (root build files, gradle wrapper,
+              # gradle.properties) affects every Gradle invocation
+              # — including the KMP framework build iOS depends on.
+              # Conservatively trigger both pipelines.
+              gradle/*|*.gradle.kts|gradle.properties|gradlew|gradlew.bat) ANDROID_APP=true; IOS_APP=true; APP=true ;;
+              # Integration test files match BEFORE express-api/* so a
+              # PR that changes ONLY tests/integration/ files runs the
+              # integration job without dragging in the heavier
+              # backend-changed gate (Sonar, full backend suite).
+              tests/integration/*|playwright.integration.config.ts) INTEGRATION=true ;;
+              # Driver-specific PR signal — matched BEFORE the generic
+              # express-api/* branch so a driver-only change can light up
+              # the fast qa-runner-driver-checks job in parallel with
+              # the heavier test-backend job. BACKEND is set too so the
+              # existing backend test suite still runs (regression safety
+              # — driver code is a subset of the backend).
+              express-api/scripts/drivers/*|express-api/tests/scripts/drivers/*) QA_RUNNER_DRIVERS=true; BACKEND=true ;;
+              express-api/*|firestore.rules|database.rules.json) BACKEND=true ;;
+              .github/*|.claude/*|.project/*|*.md|.gitignore|.gitattributes) ;;
+              *) OTHER=true ;;
+            esac
+          done <<< "$CHANGED"
+          WORKFLOW_ONLY=false
+          if [ "$APP" = "false" ] && [ "$BACKEND" = "false" ] && [ "$WEB" = "false" ] && [ "$INTEGRATION" = "false" ] && [ "$OTHER" = "false" ]; then
+            WORKFLOW_ONLY=true
+          fi
+          # Explicit per-platform E2E skip markers in the PR body. Use when the
+          # developer has verified locally that the changeset cannot affect that
+          # platform's runtime behaviour (e.g. an iOS-only feature whose
+          # commonMain additions are not consumed by Android Koin wiring). The
+          # paid runner emulator pool flakes intermittently; gating iOS-only
+          # work on Android E2E wastes minutes and blocks legitimate merges.
+          #
+          # Marker must be on its OWN LINE (anchored with `^…$`) so quoted text
+          # like "this is NOT a [skip-android-e2e] PR" or "- [ ] [skip-android-e2e]"
+          # in checklists and code blocks does not accidentally trip the gate.
+          # `printf '%s'` (not echo) avoids -e/escape interpretation in PR bodies.
+          SKIP_ANDROID_E2E=false
+          SKIP_IOS_E2E=false
+          if printf '%s' "$PR_BODY" | grep -qE '^[[:space:]]*\[skip-android-e2e\][[:space:]]*$'; then
+            SKIP_ANDROID_E2E=true
+          fi
+          if printf '%s' "$PR_BODY" | grep -qE '^[[:space:]]*\[skip-ios-e2e\][[:space:]]*$'; then
+            SKIP_IOS_E2E=true
+          fi
+          # SHY-0127 — the Express backend is the shared core of every app +
+          # webpage, so ANY backend change is treated as "everything needs
+          # testing": force the full client matrix on AND override the
+          # per-platform E2E skip markers. A backend regression can break any
+          # client, so no client suite may be skipped on a backend change.
+          if [ "$BACKEND" = "true" ]; then
+            APP=true; ANDROID_APP=true; IOS_APP=true; WEB=true; INTEGRATION=true
+            SKIP_ANDROID_E2E=false; SKIP_IOS_E2E=false
+          fi
+          for v in app_changed=$APP android_app_changed=$ANDROID_APP ios_app_changed=$IOS_APP backend_changed=$BACKEND web_changed=$WEB integration_changed=$INTEGRATION qa_runner_drivers_changed=$QA_RUNNER_DRIVERS workflow_only=$WORKFLOW_ONLY skip_android_e2e=$SKIP_ANDROID_E2E skip_ios_e2e=$SKIP_IOS_E2E; do
+            echo "$v" >> "$GITHUB_OUTPUT"
+          done
+          echo "Detection results: app=$APP android_app=$ANDROID_APP ios_app=$IOS_APP backend=$BACKEND web=$WEB integration=$INTEGRATION qa_runner_drivers=$QA_RUNNER_DRIVERS workflow_only=$WORKFLOW_ONLY skip_android_e2e=$SKIP_ANDROID_E2E skip_ios_e2e=$SKIP_IOS_E2E"
+
+  lint:
+    needs: [detect-changes]
+    # No workflow_only short-circuit: lint.yml's unconditional steps
+    # (actionlint, check-no-paid-runners, check-workflow-concurrency-
+    # scoping, check-orphan-i18n-keys, check-release-trigger) MUST run
+    # on workflow-only PRs — that's the case where they matter most,
+    # since those PRs are the ones changing workflows. The heavyweight
+    # steps inside lint.yml (ktlint, Express lint, Gherkin lint) are
+    # already gated on app_changed / backend_changed, so the cost on
+    # workflow-only PRs is ~30s of cheap shellcheck/script invocations.
+    uses: ./.github/workflows/lint.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha }}
+      app_changed: ${{ needs.detect-changes.outputs.app_changed == 'true' }}
+      backend_changed: ${{ needs.detect-changes.outputs.backend_changed == 'true' }}
+      # Thread PR body through for the SHY-0035 large-file lint's
+      # [allow-large-file: <path>] escape-hatch marker. Explicit input
+      # is more robust than relying on `github.event.pull_request.body`
+      # being implicitly available in the called workflow's context.
+      pr_body: ${{ github.event.pull_request.body }}
+    secrets: inherit
+
+  build-and-test:
+    name: Build & Test
+    needs: [detect-changes, lint, test-backend]
+    if: |
+      always() &&
+      needs.detect-changes.outputs.android_app_changed == 'true' &&
+      (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
+      (needs.test-backend.result == 'success' || needs.test-backend.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: ./.github/actions/setup-jdk-gradle
+
+      - uses: ./.github/actions/decode-google-services
+        with:
+          dev-base64: ${{ secrets.GOOGLE_SERVICES_DEV_BASE64 }}
+          prod-base64: ${{ secrets.GOOGLE_SERVICES_PROD_BASE64 }}
+
+      - uses: ./.github/actions/decode-keystore
+        with:
+          keystore-base64: ${{ secrets.KEYSTORE_BASE64 }}
+          fallback-debug: 'true'
+
+      - name: Run unit tests, detekt, and build devRelease APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || 'android' }}
+          LIVEKIT_URL: ${{ secrets.LIVEKIT_URL || 'wss://placeholder.livekit.cloud' }}
+          # Bake the persona-picker password into the dev APK so journey-based
+          # manual QA on dev variant can sign in as P-02..P-19 personas
+          # without OAuth. Must match the value the express-api provisioner
+          # used to create the dev Firebase Auth accounts (PERSONAS_PASSWORD).
+          # Falls back to empty → picker UI fails closed (BuildVariant.kt's
+          # isPersonaPickerAvailable returns false). See app/build.gradle.kts
+          # line 105 for the buildConfigField wiring.
+          DEV_QA_PERSONAS_PASSWORD: ${{ secrets.DEV_QA_PERSONAS_PASSWORD }}
+        run: ./gradlew testDevDebugUnitTest :shared:jvmTest :shared:testAndroidHostTest detekt assembleDevRelease jacocoDevDebugUnitTestReport --parallel
+
+      # Also build the local-flavor APK so AFK operators / automation
+      # can install it on test devices without needing a local Firebase
+      # emulator + Express stack running just to produce the APK. The
+      # KMP shared framework is already compiled by assembleDevRelease
+      # above; this only adds the Android local-flavor link + package
+      # step (~30-60s incremental cost).
+      #
+      # No env vars needed: the `local` flavor hardcodes its LiveKit
+      # URL (`ws://$localHostAlias:7880`) and DEV_QA_PERSONAS_PASSWORD
+      # (`localdev123`) in app/build.gradle.kts, and `assembleLocalDebug`
+      # uses the debug build type which does NOT reference the release
+      # signing config (so KEYSTORE_PASSWORD is dead). Removing them
+      # avoids misleading future maintainers.
+      - name: Build localDebug APK
+        run: ./gradlew assembleLocalDebug
+
+      - name: Upload localDebug APK
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: local-debug-apk
+          path: app/build/outputs/apk/local/debug/*.apk
+          # if-no-files-found: error — failing-loud when the glob
+          # matches zero files. Default `warn` would produce a
+          # SUCCESSFUL empty-zip upload, breaking AFK install
+          # silently (gh run download would succeed with an empty
+          # directory).
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish unit test report
+        uses: EnricoMi/publish-unit-test-result-action@c950f6fb443cb5af20a377fd0dfaa78838901040 # v2
+        if: always()
+        with:
+          check_name: Unit Tests
+          files: '**/build/test-results/**/TEST-*.xml'
+
+      - name: Upload devRelease APK
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: dev-release-apk
+          path: app/build/outputs/apk/dev/release/*.apk
+
+      - name: Upload build outputs for SonarCloud
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: build-outputs
+          retention-days: 1
+          path: |
+            **/build/test-results/
+            **/build/reports/
+            **/build/classes/
+
+      - name: Prepare Kotlin test report for GitHub Pages
+        if: always()
+        run: |
+          mkdir -p kotlin-report
+          cp -r shared/build/reports/tests/jvmTest/* kotlin-report/ 2>/dev/null || true
+          cp -r app/build/reports/tests/testDevDebugUnitTest/* kotlin-report/ 2>/dev/null || true
+          DATE=$(date +%Y-%m-%d)
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "{\"passed\":0,\"failed\":0,\"total\":0,\"date\":\"${DATE}\",\"runUrl\":\"${RUN_URL}\",\"suite\":\"kotlin\",\"env\":\"pr\"}" > kotlin-report/metadata.json
+
+      - name: Deploy Kotlin report to GitHub Pages
+        # See test-backend.yml for full rationale: skip on dependabot
+        # PRs (read-only token + gh-pages race condition). Guard on
+        # github.head_ref so a merge commit added by a human doesn't
+        # bypass the skip (github.actor would resolve to the human).
+        if: always() && !startsWith(github.head_ref, 'dependabot/')
+        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: kotlin-report
+          destination_dir: kotlin/pr/latest
+          keep_files: true
+
+  sonarcloud:
+    needs: [detect-changes, build-and-test]
+    if: |
+      always() &&
+      needs.detect-changes.result == 'success' &&
+      needs.detect-changes.outputs.workflow_only != 'true' &&
+      (needs.build-and-test.result == 'success' || needs.build-and-test.result == 'skipped')
+    uses: ./.github/workflows/sonarcloud.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha }}
+      app_changed: ${{ needs.detect-changes.outputs.app_changed == 'true' }}
+    secrets: inherit
+
+  test-backend:
+    needs: [detect-changes, lint]
+    if: |
+      always() &&
+      needs.detect-changes.outputs.backend_changed == 'true' &&
+      (needs.lint.result == 'success' || needs.lint.result == 'skipped')
+    uses: ./.github/workflows/test-backend.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha }}
+      report_env: pr
+    secrets: inherit
+
+  android-e2e:
+    needs: [detect-changes, build-and-test, sonarcloud, test-backend]
+    if: |
+      always() &&
+      needs.detect-changes.outputs.android_app_changed == 'true' &&
+      needs.detect-changes.outputs.skip_android_e2e != 'true' &&
+      needs.build-and-test.result == 'success' &&
+      (needs.sonarcloud.result == 'success' || needs.sonarcloud.result == 'skipped') &&
+      (needs.test-backend.result == 'success' || needs.test-backend.result == 'skipped')
+    uses: ./.github/workflows/e2e-tests.yml
+    with:
+      android: '33-phone'
+      parallel: true
+      ref: ${{ github.event.pull_request.head.sha }}
+      report_env: pr
+    secrets: inherit
+
+  playwright-web:
+    needs: [detect-changes, build-and-test, sonarcloud, test-backend]
+    if: |
+      always() &&
+      needs.detect-changes.outputs.web_changed == 'true' &&
+      (needs.build-and-test.result == 'success' || needs.build-and-test.result == 'skipped') &&
+      (needs.sonarcloud.result == 'success' || needs.sonarcloud.result == 'skipped') &&
+      (needs.test-backend.result == 'success' || needs.test-backend.result == 'skipped')
+    uses: ./.github/workflows/playwright-tests.yml
+    with:
+      web: 'all'
+      parallel: true
+      ref: ${{ github.event.pull_request.head.sha }}
+      report_env: pr
+    secrets: inherit
+
+  integration-tests:
+    # Cross-service contract tests (Express ↔ Firestore ↔ RTDB ↔ R2).
+    # Triggers on backend, integration-test, OR app/shared changes —
+    # the last because shared KMP-side contract changes (request
+    # shapes, response parsing) can break the integration tier even
+    # when no Express file moves. Runs after backend unit tests pass
+    # — no point lighting up the full local stack in CI if the
+    # backend's own jest suite is red.
+    needs: [detect-changes, test-backend]
+    if: |
+      always() &&
+      (needs.detect-changes.outputs.backend_changed == 'true' ||
+       needs.detect-changes.outputs.integration_changed == 'true' ||
+       needs.detect-changes.outputs.app_changed == 'true') &&
+      (needs.test-backend.result == 'success' || needs.test-backend.result == 'skipped')
+    uses: ./.github/workflows/integration-tests.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha }}
+    secrets: inherit
+
+  ios-e2e:
+    needs: [detect-changes, build-and-test, sonarcloud, test-backend]
+    if: |
+      always() &&
+      needs.detect-changes.outputs.ios_app_changed == 'true' &&
+      needs.detect-changes.outputs.skip_ios_e2e != 'true' &&
+      (needs.build-and-test.result == 'success' || needs.build-and-test.result == 'skipped') &&
+      (needs.sonarcloud.result == 'success' || needs.sonarcloud.result == 'skipped') &&
+      (needs.test-backend.result == 'success' || needs.test-backend.result == 'skipped')
+    uses: ./.github/workflows/ios-tests.yml
+    with:
+      # Default iOS device for PR runs. Mirror of android-e2e's
+      # `android: '33-phone'` — one device, latest stable iOS, single
+      # form-factor. The job-level `if:` above already gates on
+      # `app_changed` + `skip_ios_e2e`, so this only runs when
+      # iOS-relevant code changes (and not when the PR body has the
+      # `[skip-ios-e2e]` marker).
+      #
+      # Was 'none' until 2026-05-21, which made the matrix expand to
+      # zero devices in ios-tests.yml's resolve-inputs job — the
+      # entire iOS E2E surface was symbolic. Pinned to a specific
+      # device via tests/scripts/pr-checks-ios-gating.test.js to
+      # prevent silent regression back to 'none'.
+      #
+      # Bumped 2026-05-22 from `18.1-iphone` to `26.2-iphone` to
+      # exercise the LATEST iOS runtime the macos-15 runner ships
+      # pre-installed (via Xcode 26.3). Older versions remain
+      # available via workflow_dispatch with `ios: 'all'`. Pinned by
+      # tests/scripts/ios-26-xcode-bump.test.js.
+      ios: '26.2-iphone'
+      parallel: true
+      ref: ${{ github.event.pull_request.head.sha }}
+    secrets: inherit
+
+  qa-runner-driver-checks:
+    # Fast signal for PRs touching express-api/scripts/drivers/** — runs
+    # the driver-contract test + --check-drivers in parallel with the
+    # heavier test-backend job. Closes gap E4 from the QA-runner framework
+    # tracker. Skipped on non-driver PRs; required when triggered.
+    needs: [detect-changes]
+    if: |
+      always() &&
+      needs.detect-changes.outputs.qa_runner_drivers_changed == 'true'
+    uses: ./.github/workflows/qa-runner-driver-checks.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha }}
+
+  pre-merge-gate:
+    name: Pre-Merge Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      # SHY-0127 Gate 1: a PR that touches a SHY story MUST have flipped it to
+      # In Review (not Draft/In Progress) before it can merge. The script skips
+      # when no story .md is in the diff, or for draft PRs.
+      - name: Story status must be In Review before merge
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          IS_DRAFT: ${{ github.event.pull_request.draft }}
+        run: node scripts/check-pr-story-status.js
+
+  gate:
+    name: PR Gate
+    needs: [detect-changes, pre-merge-gate, lint, build-and-test, sonarcloud, test-backend, android-e2e, playwright-web, integration-tests, ios-e2e, qa-runner-driver-checks]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Evaluate results
+        run: |
+          # detect-changes MUST succeed — if cancelled, all skips are invalid
+          if [ "${{ needs.detect-changes.result }}" != "success" ]; then
+            echo "detect-changes did not succeed: ${{ needs.detect-changes.result }}"
+            exit 1
+          fi
+
+          # Check each job — failure or cancelled = block merge
+          for result in \
+            "${{ needs.pre-merge-gate.result }}" \
+            "${{ needs.lint.result }}" \
+            "${{ needs.build-and-test.result }}" \
+            "${{ needs.sonarcloud.result }}" \
+            "${{ needs.test-backend.result }}" \
+            "${{ needs.android-e2e.result }}" \
+            "${{ needs.playwright-web.result }}" \
+            "${{ needs.integration-tests.result }}" \
+            "${{ needs.ios-e2e.result }}" \
+            "${{ needs.qa-runner-driver-checks.result }}"; do
+            if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
+              echo "Required check failed: $result"
+              exit 1
+            fi
+          done
+          echo "All checks passed or were correctly skipped"

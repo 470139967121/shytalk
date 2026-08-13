@@ -1,0 +1,88 @@
+platform :ios, '18.0'
+
+# Custom-flavour configuration mapping. Without this, CocoaPods sees the
+# custom project-level configs in iosApp.xcodeproj (Debug-Local +
+# Release-Local for the iOS local flavour; Debug-Dev for SHY-0104's
+# public-dev-backend variant) but doesn't know whether to treat each as
+# debug-style or release-style. Result: refuses to generate the matching
+# Pods-iosApp.<config>.xcconfig — and pod install errors with "There may
+# only be up to 1 unique SWIFT_VERSION per target" when iosAppTests is
+# integrated below (SWIFT_VERSION resolves to empty on configs that lack a
+# known mapping).
+project 'iosApp.xcodeproj',
+  'Debug-Local' => :debug,
+  'Release-Local' => :release,
+  'Debug-Dev' => :debug
+
+target 'iosApp' do
+  use_frameworks! :linkage => :static
+
+  # Firebase iOS SDK — same services as Android
+  pod 'FirebaseCore'
+  pod 'FirebaseAuth'
+  pod 'FirebaseFirestore'
+  pod 'FirebaseDatabase'
+  pod 'FirebaseMessaging'
+
+  # Google Sign-In
+  pod 'GoogleSignIn'
+
+  # LiveKit migrated to Swift Package Manager 2026-05-26 (task #24b).
+  # CocoaPods Trunk pinned LiveKitClient at 2.0.18 — LiveKit stopped
+  # publishing to Trunk after that and now distributes exclusively
+  # via SPM. The SPM dependency lives in iosApp.xcodeproj (added by
+  # `ruby scripts/ios/add-livekit-spm.rb`); current pinned-minimum
+  # version is 2.14.1.
+
+  # iosAppTests target hosts the iosApp executable (TEST_HOST=...) and
+  # must therefore be able to import the same Swift modules the app
+  # uses (FirebaseCore, GoogleSignIn, LiveKitClient via SPM). Without this
+  # nested declaration, `pod install` generates xcconfigs for the
+  # `iosApp` target only; the test target ends up with no
+  # baseConfigurationReference and xcodebuild's `build-for-testing`
+  # phase fails with `error: Unable to find module dependency:
+  # 'FirebaseCore'` (release run 26367863711 on 2026-05-24).
+  #
+  # `inherit! :search_paths` shares the parent's framework + header
+  # search paths WITHOUT re-embedding pods in the test bundle — the
+  # frameworks are already linked into iosApp.app, which TEST_HOST
+  # loads. Re-embedding would duplicate-symbols at link time.
+  target 'iosAppTests' do
+    inherit! :search_paths
+  end
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '18.0'
+      # Pod targets are static libraries embedded in the parent app — they
+      # don't ship as separate signed bundles. Disabling code-signing for
+      # pods prevents xcodebuild's global manual-signing CLI flags
+      # (CODE_SIGN_STYLE=Manual, PROVISIONING_PROFILE_SPECIFIER, etc.) from
+      # leaking onto every pod target and triggering the "X does not support
+      # provisioning profiles" error during release archives.
+      config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+    end
+
+    # Silence "Run script build phase '…' will be run during every build
+    # because it does not specify any outputs" for CocoaPods-generated script
+    # phases that legitimately must run on every build. The gRPC-Core /
+    # gRPC-C++ / BoringSSL-GRPC / abseil "Create Symlinks to Header Folders"
+    # phases recreate header symlinks idempotently and have no practical
+    # declarable output. We apply the warning's OWN second remedy — mark them
+    # always-out-of-date (equivalent to unchecking "Based on dependency
+    # analysis"). This is intent-declaration, NOT suppression: the phases
+    # already ran on every build; we are only telling Xcode that is
+    # deliberate. Guard on `isa` so it covers any no-output shell phase a pod
+    # adds in future, and never touches phases that DO declare outputs (the
+    # Kotlin-framework and Check-Manifest phases keep their incremental
+    # behaviour).
+    target.build_phases.each do |phase|
+      next unless phase.isa == 'PBXShellScriptBuildPhase'
+      has_outputs = (phase.output_paths && !phase.output_paths.empty?) ||
+                    (phase.output_file_list_paths && !phase.output_file_list_paths.empty?)
+      phase.always_out_of_date = '1' unless has_outputs
+    end
+  end
+end

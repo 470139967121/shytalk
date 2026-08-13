@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<meta name="theme-color" content="#0f0d15">
+<title>ShyTalk — Privacy Policy</title>
+<style>
+  :root {
+    --bg: #0f0d15;
+    --surface: #1c1a24;
+    --border: #3a3550;
+    --text: #e8e0f0;
+    --text2: #a89ec0;
+    --primary: #6750a4;
+    --primary-glow: #9a82db;
+    --accent: #d0bcff;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    position: relative;
+    line-height: 1.7;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    top: 30%;
+    left: 50%;
+    width: min(600px, 100vw);
+    height: min(600px, 100vh);
+    transform: translate(-50%, -50%);
+    background: radial-gradient(circle, rgba(103,80,164,0.15) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .container {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 3rem 2rem 4rem;
+    position: relative;
+    z-index: 1;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 3rem;
+  }
+
+  .logo {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 1.5rem;
+  }
+
+  .logo a {
+    color: var(--text);
+    text-decoration: none;
+  }
+
+  .logo span {
+    color: var(--accent);
+    text-shadow: 0 0 24px rgba(208,188,255,0.3);
+  }
+
+  h1 {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--accent);
+    margin-top: 2.5rem;
+    margin-bottom: 0.75rem;
+  }
+
+  p {
+    color: var(--text2);
+    margin-bottom: 1rem;
+  }
+
+  ul {
+    color: var(--text2);
+    margin-bottom: 1rem;
+    padding-left: 1.5rem;
+  }
+
+  ul li {
+    margin-bottom: 0.4rem;
+  }
+
+  a {
+    color: var(--accent);
+    text-decoration: none;
+    transition: color 0.2s;
+  }
+
+  a:hover {
+    color: var(--primary-glow);
+  }
+
+  .last-updated {
+    color: var(--text2);
+    font-size: 0.9rem;
+    text-align: center;
+    margin-top: 0.5rem;
+    opacity: 0.7;
+  }
+
+  footer {
+    text-align: center;
+    margin-top: 3.5rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border);
+  }
+
+  footer a {
+    color: var(--text2);
+    text-decoration: none;
+    font-size: 0.85rem;
+    transition: color 0.2s;
+  }
+
+  footer a:hover {
+    color: var(--accent);
+  }
+
+  footer .copyright {
+    color: var(--text2);
+    font-size: 0.8rem;
+    margin-top: 0.75rem;
+    opacity: 0.6;
+  }
+</style>
+<script src="/js/logger.js"></script>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo"><a href="/">Shy<span>Talk</span></a></div>
+      <h1 data-i18n="pp_title">Privacy Policy</h1>
+      <p class="last-updated" data-i18n="pp_updated">Last updated: May 2026</p>
+    </header>
+
+    <main>
+      <section>
+        <h2 data-i18n="pp_s1_h">1. Information We Collect</h2>
+        <p data-i18n="pp_s1_p1"><strong>Account information</strong> — email address, display name, and profile photos you provide when creating or updating your account.</p>
+        <p data-i18n="pp_s1_p2"><strong>Device information</strong> — device manufacturer, model, operating system version, screen resolution, RAM, and app version. This helps us diagnose issues and enforce our policies.</p>
+        <p data-i18n="pp_s1_p3"><strong>Network information</strong> — IP address, ISP, ASN, and approximate geolocation derived from your IP address. This is used for safety enforcement and abuse prevention.</p>
+        <p data-i18n="pp_s1_p4"><strong>Usage logs</strong> — app actions, page views, errors, and crash reports. These help us monitor performance and fix problems.</p>
+        <p data-i18n="pp_s1_p5"><strong>Sign-in identities</strong> — if you link multiple sign-in methods (Google, Apple, Email) to your account, we store the associated provider identifiers (such as email addresses and Apple identifiers) in an identity map alongside your account to enable multi-provider sign-in.</p>
+        <p data-i18n="pp_s1_p6"><strong>Voice chat data</strong> — connection metadata only (e.g., join/leave times, connection quality). We do <strong>not</strong> record audio.</p>
+        <p data-i18n="pp_s1_p7"><strong>Age verification data</strong> — your date of birth (entered at sign-up) and, if you choose to access 18+ features (private messages, gacha), a temporary copy of a government-issued ID (passport, driver's licence, or national ID card). The ID image is reviewed by a human admin and is permanently deleted as soon as a decision is recorded — we do not retain the image after review. Only the verification status, decision timestamp, and ID type (e.g. "passport") are kept on your account afterwards.</p>
+      </section>
+
+      <section>
+        <h2 data-i18n="pp_s2_h">2. How We Use Your Information</h2>
+        <ul>
+          <li data-i18n="pp_s2_li1">Provide, maintain, and improve our services</li>
+          <li data-i18n="pp_s2_li2">Enforce community standards and our policies</li>
+          <li data-i18n="pp_s2_li3">Device and network banning for user safety</li>
+          <li data-i18n="pp_s2_li4">Error monitoring and debugging</li>
+          <li data-i18n="pp_s2_li5">Resolve your identity across multiple sign-in providers</li>
+          <li data-i18n="pp_s2_li6">Prevent multi-account abuse</li>
+          <li data-i18n="pp_s2_li7">Verify that users of 18+ gated features (private messages, gacha) are 18 or older, in line with Apple App Store content guidelines and UK Online Safety Act requirements</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2 data-i18n="pp_s3_h">3. Data Storage &amp; Retention</h2>
+        <ul>
+          <li data-i18n="pp_s3_li1"><strong>Live logs:</strong> stored in Firestore with configurable retention (default 48 hours)</li>
+          <li data-i18n="pp_s3_li2"><strong>Archived logs:</strong> stored in R2 with 90-day retention</li>
+          <li data-i18n="pp_s3_li3"><strong>User data:</strong> stored in Firestore, backed up to R2 with 7-day backup retention</li>
+          <li data-i18n="pp_s3_li4"><strong>Images and media:</strong> stored on Cloudflare R2 CDN</li>
+          <li data-i18n="pp_s3_li5"><strong>Age verification ID images:</strong> stored on Cloudflare R2 CDN ONLY until an admin records a decision (approve, reject, or DOB modify). The image is deleted as part of the same admin action. Worst-case retention is bounded by the admin queue review time, typically minutes to a few hours. Only the verification status, ID type, and decision timestamp persist after deletion.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2 data-i18n="pp_s4_h">4. Device &amp; Network Banning</h2>
+        <p data-i18n="pp_s4_p1">We may ban specific devices or network addresses to enforce our policies and protect our community. Bans may be temporary or permanent, and may be applied automatically when an account is suspended.</p>
+      </section>
+
+      <section>
+        <h2 data-i18n="pp_s5_h">5. Data Sharing</h2>
+        <p data-i18n="pp_s5_p1">We do not sell your data. We share data only with the following service providers to operate ShyTalk:</p>
+        <ul>
+          <li data-i18n="pp_s5_li1"><strong>ip-api.com</strong> — IP geolocation enrichment (free tier; no personally identifiable information is shared beyond the IP address)</li>
+          <li data-i18n="pp_s5_li2"><strong>Firebase (Google)</strong> — authentication and database services</li>
+          <li data-i18n="pp_s5_li3"><strong>Cloudflare</strong> — CDN, storage, and page hosting</li>
+          <li data-i18n="pp_s5_li4"><strong>LiveKit (self-hosted)</strong> — voice chat connections processed through our servers on Oracle Cloud infrastructure in Singapore and London, United Kingdom. Connection metadata (IP address, join/leave times, connection quality) transits through these servers during voice chat sessions.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2 data-i18n="pp_s6_h">6. Your Rights</h2>
+        <p data-i18n="pp_s6_p1">You have the right to:</p>
+        <ul>
+          <li data-i18n="pp_s6_li1">Request an export of your data</li>
+          <li data-i18n="pp_s6_li2">Request deletion of your account and associated data</li>
+        </ul>
+        <p data-i18n="pp_s6_p2">To exercise these rights, contact us at <a href="mailto:shytalk.help@gmail.com">shytalk.help@gmail.com</a>.</p>
+      </section>
+
+      <section>
+        <h2 data-i18n="pp_s7_h">7. Changes to This Policy</h2>
+        <p data-i18n="pp_s7_p1">We may update this privacy policy from time to time. Continued use of ShyTalk after changes are posted constitutes your acceptance of the revised policy.</p>
+      </section>
+
+      <section>
+        <h2 data-i18n="pp_s8_h">8. Data Controller</h2>
+        <p data-i18n="pp_s8_p1">The data controller responsible for your personal data is Shyden Ltd (Company No. 17110487), registered at 71-75 Shelton Street, Covent Garden, London, WC2H 9JQ, United Kingdom.</p>
+        <p data-i18n="pp_s8_p2">For data protection enquiries, contact us at <a href="mailto:shytalk.help@gmail.com">shytalk.help@gmail.com</a>.</p>
+      </section>
+
+      <section>
+        <h2 data-i18n="pp_s9_h">9. Contact</h2>
+        <p data-i18n="pp_s9_p1">If you have questions about this privacy policy, contact us at <a href="mailto:shytalk.help@gmail.com">shytalk.help@gmail.com</a>.</p>
+      </section>
+
+      <section>
+        <h2 data-i18n="pp_s10_h">10. Age Verification</h2>
+        <p data-i18n="pp_s10_p1"><strong>Why we collect this.</strong> ShyTalk's private messages and gacha features are 18+. Apple App Store guideline 1.1.4 and the UK Online Safety Act both require us to make a reasonable effort to confirm a user is 18 or older before granting access to those features.</p>
+        <p data-i18n="pp_s10_p2"><strong>How verification works.</strong> The 18+ features are gated behind a server-side flag on your account. To unlock them, you upload one government-issued ID image (passport, driver's licence, or national ID card) to a private review queue. An admin compares the date of birth on the ID against the date of birth on your account, then records a decision: approve, reject, or modify the date of birth on file.</p>
+        <p data-i18n="pp_s10_p3"><strong>Image lifetime.</strong> Your ID image is uploaded directly to encrypted storage (Cloudflare R2) using a short-lived signed URL — the upload bypasses our backend so the image never touches our application servers. The image is permanently deleted as part of the same admin action that records the decision; we do not retain copies, backups, or thumbnails. The only persistent record afterwards is the verification status, ID type (e.g. "passport"), decision timestamp, and an audit-log entry naming the admin who decided.</p>
+        <p data-i18n="pp_s10_p4"><strong>Sub-18 users.</strong> If your account's date of birth indicates you are under 18, you cannot enter the verification flow. The 18+ features remain disabled and you cannot override this by submitting an ID. If you believe the date of birth on your account is wrong, please contact support — we will not accept ID submissions to override the date of birth on file. Once you turn 18, the verification flow becomes available automatically.</p>
+        <p data-i18n="pp_s10_p5"><strong>Reverting verification.</strong> If an admin reviewing your ID determines that the date of birth on file is wrong AND that you are under 18, your verification status is reverted, the 18+ features are disabled, and any existing private-message threads on your account are locked until you reach 18. The admin records a written reason for this decision in the audit log, and you receive a system message explaining the change.</p>
+        <p data-i18n="pp_s10_p6"><strong>Legal basis (UK GDPR / EU GDPR).</strong> We process this data on the basis of legal obligation (Apple guideline 1.1.4, UK Online Safety Act) and legitimate interest (preventing minors from accessing 18+ features). You have all the rights described in section 6 above, including the right to request deletion of your verification records.</p>
+        <p data-i18n="pp_s10_p7"><strong>Non-prod environments.</strong> ShyTalk operates a development environment for internal testing. In that environment the verification flow runs end-to-end but the ID image is treated as test data — please <strong>do NOT</strong> submit a real government-issued ID in the dev environment. Upload any non-sensitive image (a screenshot, a photo of a book, etc.) to exercise the flow.</p>
+      </section>
+
+      <section>
+        <h2 data-i18n="pp_s11_h">11. Account Cohorts (UK Online Safety Act)</h2>
+        <p data-i18n="pp_s11_p1"><strong>Why we separate accounts by age.</strong> The UK Online Safety Act requires services with under-18 users to take proportionate steps to keep minors and adults from interacting with each other on social features. To meet this duty we group every ShyTalk account into one of two cohorts &mdash; <em>minor</em> (under 18) or <em>adult</em> (18 and over) &mdash; and limit cross-cohort visibility and interaction across the app.</p>
+        <p data-i18n="pp_s11_p2"><strong>How your cohort is decided.</strong> Your cohort is derived automatically from the date of birth on your account. It is recalculated at every sign-in, so an account that has crossed its 18th birthday moves to the adult cohort on the next sign-in without any action from you.</p>
+        <p data-i18n="pp_s11_p3"><strong>What the cohort affects.</strong> Discovery, search, follow lists, leaderboards, gift-walls, voice rooms, 1:1 conversations, group conversations, gift sending, peer-to-peer coin transfers, and push notifications are all filtered so that accounts in different cohorts do not see or interact with each other. Profiles and rooms outside your cohort are presented as "unavailable" rather than naming the reason &mdash; this is deliberate, so that no user can infer another user's age from the app's behaviour.</p>
+        <p data-i18n="pp_s11_p4"><strong>Existing connections.</strong> When this policy was first applied we ran a one-off migration: cross-cohort follow links were removed, cross-cohort 1:1 conversation threads were hidden, and mixed-cohort group conversations were frozen (preserved as read-only, with no new members or messages permitted). Affected users received a system message explaining what changed. We could not preserve any cross-cohort interaction state and these changes cannot be reversed from within the app.</p>
+        <p data-i18n="pp_s11_p5"><strong>Cohort overrides.</strong> A small number of staff and partner accounts (clearly identified internally) may have their cohort manually set by an administrator. Every override writes an entry to our internal audit log naming the administrator, the target account, the previous and new cohort, and the written reason supplied at the time. Overrides do not apply to ordinary user accounts.</p>
+        <p data-i18n="pp_s11_p6"><strong>Your rights.</strong> Your cohort is derived from data you provided (date of birth) and is processed under the same legal bases as the rest of your account information (section 6 above). You can request the current cohort value on your account and the audit-log history of any cohort changes by contacting support. If you believe your date of birth is wrong on the account, see section 10 ("Age Verification") &mdash; correcting the date of birth automatically corrects the cohort on the next sign-in.</p>
+      </section>
+    </main>
+
+    <footer>
+      <a href="/terms.html" data-i18n="footer_terms">Terms of Service</a> &nbsp;&middot;&nbsp;
+      <a href="/community-guidelines.html" data-i18n="footer_guidelines">Community Guidelines</a> &nbsp;&middot;&nbsp;
+      <a href="/cyber-bullying.html" data-i18n="footer_cyber">Cyber Bullying Policy</a> &nbsp;&middot;&nbsp;
+      <a href="/do-not-sell.html" data-i18n="footer_do_not_sell">Do Not Sell or Share My Personal Information</a>
+      <p class="copyright" data-i18n="footer_copy">&copy; 2026 Shyden Ltd. All rights reserved.</p>
+    </footer>
+  </div>
+<script>window.LEGAL_PAGE_TYPE = 'privacy';</script>
+<script src="/js/shared-header.js"></script>
+<script src="/js/language-selector.js"></script>
+<script src="/js/legal-translations.js"></script>
+<script>
+  var lang = (window.ShyTalkLanguage && window.ShyTalkLanguage.get()) || 'en';
+  applyLegalTranslations('privacy', lang);
+</script>
+<script>
+  ShyTalkLogger.init({
+    source: 'privacy-page',
+    endpoint: (location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? 'http://localhost:3000' : location.hostname.includes('dev') ? 'https://dev-api.shytalk.shyden.co.uk' : 'https://api.shytalk.shyden.co.uk') + '/api/logs'
+  });
+</script>
+<script type="module" src="/js/seasonal-theme.js"></script>
+<script src="/js/preview-watermark.js" defer></script>
+</body>
+</html>

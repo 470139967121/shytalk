@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>ShyTalk</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+	<!--
+	    MARKETING_VERSION + CURRENT_PROJECT_VERSION are injected by the
+	    deploy workflows (deploy-dev.yml uses GITHUB_RUN_NUMBER + the
+	    versionName from app/build.gradle.kts; deploy-prod.yml uses both
+	    versionCode + versionName from app/build.gradle.kts which the
+	    manual Release workflow keeps in sync). Hard-coding literal
+	    values here would silently override the build-setting injection
+	    and ship every build with `1.0` / `1`, which TestFlight rejects
+	    as a duplicate after the first upload.
+	-->
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+	</dict>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>armv7</string>
+	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.881846974606-rd2uudj8kgumrmkhpqhquk02q8ge0tu5</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+		<string>fetch</string>
+		<string>remote-notification</string>
+	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>ShyTalk needs microphone access for voice rooms.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>ShyTalk needs camera access to take profile photos.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>ShyTalk needs photo library access to share images.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>ShyTalk uses Face ID to secure your account.</string>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<!--
+	    Encryption export compliance.
+	    https://developer.apple.com/documentation/security/complying-with-encryption-export-regulations
+
+	    Set to false because ShyTalk only uses encryption that is exempt
+	    from US export regulations:
+	      - HTTPS for the app's primary purpose (Firebase Auth, Express
+	        API, R2 storage)
+	      - Standard iOS encryption (Keychain, Face ID, code-signed
+	        binaries) used as-shipped
+	      - LiveKit WebRTC's standard DTLS-SRTP for voice rooms
+	      - APNs (Apple-managed encryption end-to-end)
+
+	    Without this key, every TestFlight upload sits in "Missing
+	    Compliance" status and isn't auto-distributed to internal
+	    testers — which is what blocked TestFlight distribution after
+	    PR #372 restored uploads.
+	-->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<!--
+	    SHY-0104 — persona-picker password for the Debug-Dev variant.
+	    Reads the $(DEV_QA_PERSONAS_PASSWORD) build setting: the real value
+	    is injected at build time only on Debug-Dev (xcodebuild command-line
+	    override sourced from ~/.shytalk/dev-personas.env, never committed).
+	    Every other configuration leaves the var undefined, so this resolves
+	    to an EMPTY string — the password literal is absent from any
+	    distributable IPA, and iOSApp.swift's resolver coerces empty → nil so
+	    the picker fails closed. Swift reads it via
+	    Bundle.main.infoDictionary["DevQaPersonasPassword"].
+	-->
+	<key>DevQaPersonasPassword</key>
+	<string>$(DEV_QA_PERSONAS_PASSWORD)</string>
+</dict>
+</plist>

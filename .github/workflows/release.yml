@@ -1,0 +1,423 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+# Releases are manual: merge small PRs to main freely; cut a Release
+# only when a stable batch is ready by triggering this workflow from the
+# Actions tab.
+#
+# Architecture (SHY-0034, 2026-06-08): the signed release commit
+# (`chore: release vX.Y.Z`) is written DIRECTLY to main via GitHub's
+# GraphQL `createCommitOnBranch` mutation. The Release GitHub App
+# (App ID 29110) is registered as a `bypass_actors` Integration entry
+# on main's branch-protection ruleset (id 12613584), permitting the
+# App to bypass the `pull_request` requirement for THIS one path while
+# preserving signed-commit enforcement (`required_signatures` rule).
+# Once the commit lands, `release-tag.yml` fires on the push event and
+# creates the git tag + GitHub Release. No release branch is created;
+# no PR is opened; no auto-merge ceremony.
+#
+# History: the previous flow opened a `release/v*-r<run-id>` branch +
+# PR + enabled auto-merge. That worked but every failed/cancelled run
+# left an orphan release branch (6 swept in SHY-0033 contributing to
+# the 506-branch repo state). SHY-0034 eliminates the orphan source.
+#
+# Dev-build distribution stays automatic — deploy-dev.yml injects a
+# unique iOS CFBundleVersion from GITHUB_RUN_NUMBER so TestFlight uploads
+# don't collide between releases. Android dev uses versionNameSuffix
+# from the same run number for the same reason.
+
+jobs:
+  create-release-commit:
+    name: Create Release Commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          # `client-id` replaces the deprecated `app-id` input in v3.x.
+          # The action aliases both to the same internal `appId` (see
+          # actions/create-github-app-token main.js: `appId: clientId`),
+          # so the existing RELEASE_APP_ID secret value (numeric App ID)
+          # continues to work — GitHub's App-JWT iss claim accepts both
+          # the numeric App ID and the alphanumeric Client ID.
+          client-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          # Need full history to walk back to the previous release tag
+          # for the release-notes generation step below.
+          fetch-depth: 0
+
+      - name: Guard against double-fired releases
+        run: |
+          set -euo pipefail
+          # Workflow concurrency keeps two runs from executing in
+          # parallel, but cancel-in-progress: false lets a queued run
+          # start AFTER the in-progress one finishes. If the operator
+          # double-clicks Run Workflow, run B would observe HEAD already
+          # at a freshly-bumped `chore: release vX.Y.Z` and silently
+          # bump it again to vX.Y.Z+1, producing a duplicate release
+          # that the operator never asked for. Refuse to bump on top of
+          # another release commit — the operator must explicitly choose
+          # whether the second click was intentional.
+          LATEST_SUBJECT=$(git log -1 --format='%s')
+          # Accept optional ` (#NNN)` suffix because squash-merged
+          # release PRs land on main with that PR-number suffix
+          # appended by GitHub. Without the optional group, this guard
+          # would FAIL to detect a just-merged release as a release
+          # commit and would happily double-bump on top of it.
+          if echo "$LATEST_SUBJECT" | grep -qE '^chore: release v[0-9]+\.[0-9]+\.[0-9]+( \(#[0-9]+\))?$'; then
+            echo "::error::HEAD is already a release commit ('$LATEST_SUBJECT'). Refusing to bump on top of an existing release. If this was intentional (e.g. publishing a same-content re-tag), do it manually."
+            exit 1
+          fi
+          # Per SHY-0034 (2026-06-08): no release PRs are opened in the
+          # new flow, so no "open release PR" guard is needed. The
+          # HEAD-is-already-a-release-commit guard above + the workflow's
+          # `concurrency: release-main` group at file-top + the
+          # `expectedHeadOid` optimistic-concurrency check in the
+          # createCommitOnBranch mutation provide complete double-fire
+          # protection. release/v* branches are no longer created so no
+          # orphan cleanup is needed either.
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+
+      - name: Resolve bump type from input
+        id: bump
+        run: |
+          set -euo pipefail
+          BUMP="${{ inputs.bump }}"
+          case "$BUMP" in
+            major|minor|patch) ;;
+            *)
+              echo "::error::Invalid bump input '$BUMP' — must be one of major/minor/patch"
+              exit 1
+              ;;
+          esac
+          echo "type=$BUMP" >> "$GITHUB_OUTPUT"
+          echo "Bump type: $BUMP"
+
+      - name: Bump version
+        id: version
+        run: |
+          set -euo pipefail
+          # Extract current version. Anchor the regex to the assignment
+          # form `versionCode = N` / `versionName = "X"` so a comment like
+          # `// Bumped versionCode 160 -> 161` doesn't get parsed as the
+          # value (head -1 on `grep versionCode` would silently pick the
+          # comment and sed would concatenate ALL digits in it). `|| true`
+          # keeps a no-match awk from exiting the script under
+          # `set -euo pipefail` — we want the is-empty guard below to
+          # fire with a clear error instead.
+          CURRENT=$(awk -F'"' '/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"/ {print $2; exit}' app/build.gradle.kts || true)
+          CURRENT_CODE=$(awk '/^[[:space:]]*versionCode[[:space:]]*=[[:space:]]*[0-9]+/ {gsub(/[^0-9]/,"",$3); print $3; exit}' app/build.gradle.kts || true)
+
+          if [ -z "$CURRENT" ] || [ -z "$CURRENT_CODE" ]; then
+            echo "::error::Could not parse current version from app/build.gradle.kts (got CURRENT='$CURRENT' CURRENT_CODE='$CURRENT_CODE')"
+            grep -E 'versionName|versionCode' app/build.gradle.kts | head -5
+            exit 1
+          fi
+
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          BUMP="${{ steps.bump.outputs.type }}"
+
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+            *) echo "::error::Unexpected bump type: $BUMP"; exit 1 ;;
+          esac
+
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          NEW_CODE=$((CURRENT_CODE + 1))
+
+          sed -i "s/versionCode = ${CURRENT_CODE}/versionCode = ${NEW_CODE}/" app/build.gradle.kts
+          sed -i "s/versionName = \"${CURRENT}\"/versionName = \"${NEW_VERSION}\"/" app/build.gradle.kts
+
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Bumped: ${CURRENT} → ${NEW_VERSION} (code: ${CURRENT_CODE} → ${NEW_CODE})"
+
+      - name: Generate release notes from PRs since last tag
+        id: notes
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          NOTES_FILE=$(mktemp)
+          PLAY_FILE="app/src/main/play/release-notes/en-US/internal.txt"
+
+          # Walk back to the previous release tag. If no tags exist yet,
+          # fall back to the first commit on main so we still get sane
+          # output for the first manual release.
+          LAST_TAG=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo "")
+          if [ -n "$LAST_TAG" ]; then
+            RANGE="${LAST_TAG}..HEAD"
+            echo "Aggregating commits since ${LAST_TAG}"
+          else
+            # Distinguish "first release ever" from "tags exist but none
+            # match v*". Walking the entire history when the user has
+            # been tagging with a non-v scheme would silently emit a
+            # changelog of every commit ever — fail loud instead.
+            if [ -n "$(git tag -l)" ]; then
+              echo "::error::Tags exist but none match 'v*' — refusing to generate full-history changelog. Verify your tag naming or pass an explicit base."
+              git tag -l | head -10
+              exit 1
+            fi
+            RANGE=""
+            echo "No prior release tag found — aggregating all commits"
+          fi
+
+          # First-parent walk on main so we get one line per merged PR,
+          # not per intermediate commit on the PR branch. We use an
+          # ALLOWLIST of Conventional-Commits types instead of a denylist
+          # so non-CC commit subjects (e.g. an emergency hotfix done via
+          # the GitHub web UI without a `feat:` prefix) don't leak into
+          # user-facing release notes verbatim.
+          # Allowed: feat / fix / perf — types that produce a user-
+          # observable change. revert is deliberately excluded because
+          # `revert(x): feat(y): added z` would survive the filter and
+          # the prefix-strip would leave `feat(y): added z` in the notes
+          # — advertising a reverted feature as new. docs/refactor/test/
+          # chore/ci/build/style are also excluded.
+          # When the empty-RANGE branch fires (genuinely first release),
+          # cap to 50 most-recent matches to keep the GitHub Release
+          # body readable instead of dumping every commit since project
+          # inception.
+          # `git log` failures (corrupt repo, bad RANGE) need to abort —
+          # don't mask with `|| true`. We've validated RANGE above so a
+          # failure here is genuinely exceptional.
+          #
+          # Use a bash array to pass RANGE: an unquoted `$RANGE` triggers
+          # SC2086, but a quoted `"$RANGE"` would pass an empty-string
+          # argument to git in the first-release-ever case (RANGE="") and
+          # confuse the rev parser. Array form expands to ZERO args when
+          # RANGE is empty (genuinely first release → all commits) and
+          # ONE arg when RANGE is set ("tag..HEAD" → range filter).
+          range_args=()
+          [ -n "$RANGE" ] && range_args=("$RANGE")
+          ALL_LINES=$(git log "${range_args[@]}" --first-parent --pretty=format:'%s')
+          # `grep` returns exit 1 when there are no matches (legitimate
+          # "no user-facing changes" case). Swallow ONLY that specific
+          # exit so a real error from grep (regex compile, I/O) or sed
+          # (regex compile, write failure) still propagates and aborts
+          # under set -euo pipefail.
+          USER_FACING=$(echo "$ALL_LINES" \
+            | { grep -E '^(feat|fix|perf)(\(.+\))?:' || [ $? -eq 1 ]; } \
+            | sed -E 's/^[a-z]+(\([^)]*\))?: //')
+          # Reverts are summarised separately so they appear distinctly
+          # in the notes rather than masquerading as new features. Drop
+          # the `revert(scope): ` outer prefix only — keep the inner
+          # subject so users can see WHAT was reverted.
+          REVERTS=$(echo "$ALL_LINES" \
+            | { grep -E '^revert(\(.+\))?:' || [ $? -eq 1 ]; } \
+            | sed -E 's/^revert(\([^)]*\))?: //')
+          if [ -z "$LAST_TAG" ]; then
+            USER_FACING=$(echo "$USER_FACING" | head -50)
+            REVERTS=$(echo "$REVERTS" | head -10)
+          fi
+
+          # Build full release notes for GitHub Release + Firebase
+          # Distribution. Even if USER_FACING is empty (e.g. first run
+          # with only chore/ci commits) we still emit a header so the
+          # release page isn't blank.
+          {
+            echo "## v${VERSION}"
+            echo ""
+            if [ -n "$USER_FACING" ]; then
+              echo "### What's new"
+              echo ""
+              echo "$USER_FACING" | while IFS= read -r line; do
+                # Trim trailing PR number suffix " (#NNN)" — read better
+                # in the GitHub Release UI which already links to PRs.
+                cleaned=$(echo "$line" | sed -E 's/[[:space:]]*\(#[0-9]+\)[[:space:]]*$//')
+                echo "- ${cleaned}"
+              done
+            elif [ -z "$REVERTS" ]; then
+              # No reverts and no user-facing — truly internal release.
+              echo "Internal release with no user-facing changes."
+            fi
+            if [ -n "$REVERTS" ]; then
+              echo ""
+              echo "### Reverted"
+              echo ""
+              echo "$REVERTS" | while IFS= read -r line; do
+                cleaned=$(echo "$line" | sed -E 's/[[:space:]]*\(#[0-9]+\)[[:space:]]*$//')
+                echo "- ${cleaned}"
+              done
+            fi
+          } > "$NOTES_FILE"
+
+          echo "notes_file=$NOTES_FILE" >> "$GITHUB_OUTPUT"
+
+          # Google Play release notes (max 500 chars per locale).
+          {
+            echo "v${VERSION}"
+            echo ""
+            if [ -n "$USER_FACING" ]; then
+              echo "$USER_FACING" | head -8 | while IFS= read -r line; do
+                cleaned=$(echo "$line" | sed -E 's/[[:space:]]*\(#[0-9]+\)[[:space:]]*$//')
+                echo "- ${cleaned}"
+              done
+            elif [ -z "$REVERTS" ]; then
+              echo "Internal improvements."
+            fi
+            if [ -n "$REVERTS" ]; then
+              echo ""
+              echo "Reverted:"
+              echo "$REVERTS" | head -3 | while IFS= read -r line; do
+                cleaned=$(echo "$line" | sed -E 's/[[:space:]]*\(#[0-9]+\)[[:space:]]*$//')
+                echo "- ${cleaned}"
+              done
+            fi
+          } > "$PLAY_FILE"
+
+          # Truncate to 500 CHARACTERS (not bytes) per Play Store's hard
+          # limit. `head -c` counts bytes, which would cut mid-codepoint
+          # for any non-ASCII character (PR titles legitimately contain
+          # accented locale strings + the project ships 20 locales).
+          # Cutting mid-UTF-8 produces invalid bytes that Play Console
+          # silently rejects with a generic "invalid characters" error
+          # six hours later in r0adkll/upload-google-play. Python 3
+          # string slicing is codepoint-based so safely respects
+          # character boundaries. Pass the path via env var rather than
+          # interpolating into the Python source — interpolation would
+          # break if the path contained quotes or backslashes.
+          PLAY_FILE_FOR_PY="$PLAY_FILE" python3 -c "import os; p=os.environ['PLAY_FILE_FOR_PY']; open(p,'w',encoding='utf-8').write(open(p,'r',encoding='utf-8').read()[:500])"
+
+          # Copy to default.txt (r0adkll/upload-google-play falls back to default.txt).
+          cp "$PLAY_FILE" "app/src/main/play/release-notes/en-US/default.txt"
+
+          echo "----- Generated release notes -----"
+          cat "$NOTES_FILE"
+          echo "-----------------------------------"
+
+      - name: Create signed commit on main via GraphQL
+        id: create_commit
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          # Per SHY-0034 + [[feedback-no-release-branches-use-tags]]:
+          # the GraphQL createCommitOnBranch mutation now targets `main`
+          # DIRECTLY, no intermediate release/v* branch. The Release
+          # GitHub App is registered as a `bypass_actors` entry on
+          # main's branch-protection ruleset (id 12613584) so the
+          # App can write signed commits without going through a PR.
+          # This eliminates the source of orphan release/v* branches
+          # that prior failed/cancelled runs left behind (swept in
+          # SHY-0033).
+          BRANCH="main"
+          PARENT_SHA=$(git rev-parse HEAD)
+
+          # We deliberately do NOT use `git commit` + `git push` here.
+          # That path produces UNSIGNED commits regardless of the App
+          # token used to push, because git's commit-signing depends on
+          # local GPG/SSH key configuration that doesn't exist in CI.
+          # Branch protection ruleset 12613584 has `required_signatures`
+          # enabled, so unsigned release commits get blocked from being
+          # written to main.
+          #
+          # GitHub's GraphQL `createCommitOnBranch` mutation creates
+          # commits server-side that are automatically signed as the
+          # authenticated GitHub App identity. That's the only path
+          # to signed commits from a workflow without a configured
+          # GPG/SSH key in CI.
+          #
+          # Concurrency note: `expectedHeadOid: $PARENT_SHA` provides
+          # optimistic concurrency protection. If any commit lands on
+          # main between `git rev-parse HEAD` above and the mutation
+          # below, the mutation fails with a clear conflict error and
+          # this workflow run exits non-zero with no partial state.
+          # The operator simply re-triggers. This is acceptable since
+          # release runs are rare and concurrent commits on main during
+          # a release window are even rarer.
+
+          # SHY-0065: build the entire GraphQL request body in ONE jq
+          # null-input invocation. The prior two-step pattern (mirrored on
+          # sync-roadmap-data.yml until SHY-0064 fixed it) used a second jq
+          # to pass a base64-encoded additions array via argjson — once
+          # payload exceeds Linux's effective ARG_MAX (typically ~1.5MB on
+          # GitHub-hosted runners), that path dies with `Argument list too
+          # long`. release.yml's current payload (~24KB base64) is well below
+          # that limit, but Play Store release-notes can grow + future builds
+          # may add files, so we apply the SHY-0064 fix preventively. Pattern:
+          # --rawfile reads each file inside this single jq, and the additions
+          # array is constructed inline within the jq filter via ($cN|@base64).
+          # The only large value is the final PAYLOAD bash variable, which is
+          # piped to `gh api graphql --input -` via stdin — kernel argv limits
+          # don't apply to bash variables, only to execve(argv).
+          PAYLOAD=$(jq -n \
+            --arg repo "${{ github.repository }}" \
+            --arg branch "${BRANCH}" \
+            --arg oid "${PARENT_SHA}" \
+            --arg msg "chore: release v${VERSION}" \
+            --rawfile c1 app/build.gradle.kts \
+            --rawfile c2 app/src/main/play/release-notes/en-US/internal.txt \
+            --rawfile c3 app/src/main/play/release-notes/en-US/default.txt \
+            '{
+              query: "mutation($repo: String!, $branch: String!, $oid: GitObjectID!, $msg: String!, $additions: [FileAddition!]!) { createCommitOnBranch(input: { branch: { repositoryNameWithOwner: $repo, branchName: $branch }, expectedHeadOid: $oid, fileChanges: { additions: $additions }, message: { headline: $msg } }) { commit { oid url } } }",
+              variables: {
+                repo: $repo, branch: $branch, oid: $oid, msg: $msg,
+                additions: [
+                  {path: "app/build.gradle.kts", contents: ($c1|@base64)},
+                  {path: "app/src/main/play/release-notes/en-US/internal.txt", contents: ($c2|@base64)},
+                  {path: "app/src/main/play/release-notes/en-US/default.txt", contents: ($c3|@base64)}
+                ]
+              }
+            }')
+
+          # Step 3: Submit the mutation. gh api graphql --input - reads
+          # the full request body from stdin (query + variables), which
+          # handles complex variable types (FileAddition[]) cleanly.
+          RESPONSE=$(echo "$PAYLOAD" | gh api graphql --input -)
+          COMMIT_OID=$(echo "$RESPONSE" | jq -r '.data.createCommitOnBranch.commit.oid // empty')
+          if [ -z "$COMMIT_OID" ]; then
+            echo "::error::createCommitOnBranch mutation failed — response below."
+            echo "$RESPONSE" | jq .
+            exit 1
+          fi
+          echo "Created signed commit ${COMMIT_OID} on ${BRANCH}"
+          echo "commit_oid=${COMMIT_OID}" >> "$GITHUB_OUTPUT"
+
+          # Job summary records the audit trail (replacing the
+          # PR-as-audit-trail that the previous flow provided). Per
+          # SHY-0034 architect risk #5: this step output is the
+          # canonical record of who-released-what-when.
+          {
+            echo "## Release Commit Created: v${VERSION}"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **Version** | \`v${VERSION}\` |"
+            echo "| **Bump** | ${{ steps.bump.outputs.type }} |"
+            echo "| **Target branch** | \`main\` (direct via App bypass actor) |"
+            echo "| **Commit OID** | \`${COMMIT_OID}\` |"
+            echo "| **Signed by** | Release GitHub App (via \`createCommitOnBranch\`) |"
+            echo ""
+            echo "The signed commit \`chore: release v${VERSION}\` is now on \`main\`. \`release-tag.yml\` will fire on the resulting push event and create the GitHub Release + git tag."
+          } >> "$GITHUB_STEP_SUMMARY"

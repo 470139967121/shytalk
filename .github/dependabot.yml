@@ -1,0 +1,92 @@
+version: 2
+updates:
+  # Gradle dependencies (libs.versions.toml)
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "UTC"
+    labels:
+      - "dependencies"
+      - "gradle"
+    open-pull-requests-limit: 5
+    groups:
+      patch-updates:
+        update-types:
+          - "patch"
+    ignore:
+      - dependency-name: "com.google.firebase:firebase-bom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "com.android.application"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "org.jetbrains.kotlin.multiplatform"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "org.jetbrains.kotlin.plugin.compose"
+        update-types: ["version-update:semver-major"]
+      # Minor bumps gated on the navigation-compose ecosystem: compose 1.11.0+
+      # needs a navigation-compose whose Skiko aligns, but stable nav tops out
+      # at 2.9.2 (compose 1.10.x) and the next (2.10.0-alpha01) targets compose
+      # 1.12.0-alpha01 + the JetBrains EAP repo. Ignoring minor (and major)
+      # until a stable compose + stable nav 2.10 align — patches on 1.10.x still
+      # flow. Deferred #705 on 2026-05-26; remove the minor entry to revisit.
+      - dependency-name: "org.jetbrains.compose"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "androidx.compose:compose-bom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "io.livekit:livekit-android"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "androidx.credentials:credentials"
+        update-types: ["version-update:semver-major"]
+
+  # Express API npm dependencies
+  - package-ecosystem: "npm"
+    directory: "/express-api"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "UTC"
+    labels:
+      - "dependencies"
+      - "npm"
+    open-pull-requests-limit: 5
+    groups:
+      patch-updates:
+        update-types:
+          - "patch"
+
+  # Root npm dependencies (Playwright, sharp)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "UTC"
+    labels:
+      - "dependencies"
+      - "npm"
+    open-pull-requests-limit: 5
+    groups:
+      patch-updates:
+        update-types:
+          - "patch"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "UTC"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    open-pull-requests-limit: 5
+    groups:
+      patch-updates:
+        update-types:
+          - "patch"

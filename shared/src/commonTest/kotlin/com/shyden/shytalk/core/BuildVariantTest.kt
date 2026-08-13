@@ -1,0 +1,749 @@
+package com.shyden.shytalk.core
+
+import kotlin.test.AfterTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+class BuildVariantTest {
+    @AfterTest
+    fun resetState() {
+        BuildVariant.initLocalEmulator(false)
+        BuildVariant.initIosDeviceId(null)
+        BuildVariant.initBuildInfo(environment = "prod", buildVersion = "?", deviceInfo = "?")
+        BuildVariant.initApiBaseUrl(null)
+    }
+
+    @Test
+    fun `defaults to false for production safety`() {
+        BuildVariant.initLocalEmulator(false)
+        assertFalse(BuildVariant.isLocalEmulator)
+    }
+
+    @Test
+    fun `can be set to true for local emulator builds`() {
+        BuildVariant.initLocalEmulator(true)
+        assertTrue(BuildVariant.isLocalEmulator)
+    }
+
+    @Test
+    fun `can be toggled back to false`() {
+        BuildVariant.initLocalEmulator(true)
+        BuildVariant.initLocalEmulator(false)
+        assertFalse(BuildVariant.isLocalEmulator)
+    }
+
+    @Test
+    fun `localDevPersonasPassword cleared when switched back to non-emulator state`() {
+        BuildVariant.initLocalEmulator(true, devPersonasPassword = "pw")
+        BuildVariant.initLocalEmulator(false)
+        assertNull(BuildVariant.localDevPersonasPassword)
+    }
+
+    @Test
+    fun `googleWebClientId captures non-empty value`() {
+        BuildVariant.initLocalEmulator(
+            value = true,
+            googleWebClientId = "1234-test.apps.googleusercontent.com",
+        )
+        assertEquals("1234-test.apps.googleusercontent.com", BuildVariant.googleWebClientId)
+    }
+
+    @Test
+    fun `googleWebClientId coerces empty string to null`() {
+        BuildVariant.initLocalEmulator(value = false, googleWebClientId = "")
+        assertNull(BuildVariant.googleWebClientId)
+    }
+
+    @Test
+    fun `iosDeviceId defaults to null`() {
+        assertNull(BuildVariant.iosDeviceId)
+    }
+
+    @Test
+    fun `iosDeviceId captures non-blank value`() {
+        BuildVariant.initIosDeviceId("AAAA-BBBB-CCCC-DDDD")
+        assertEquals("AAAA-BBBB-CCCC-DDDD", BuildVariant.iosDeviceId)
+    }
+
+    @Test
+    fun `iosDeviceId coerces empty string to null so Koin factory fails closed`() {
+        BuildVariant.initIosDeviceId("")
+        assertNull(BuildVariant.iosDeviceId)
+    }
+
+    @Test
+    fun `iosDeviceId coerces blank-whitespace string to null`() {
+        // Defends against a future Swift bridge bug that forwards "   " for
+        // a UUID stringification edge case — the Koin factory's `?: error`
+        // fail-closed gate must trigger, not pass a junk ID to the Express
+        // API where it would land in deviceBindings/<deviceId>.
+        BuildVariant.initIosDeviceId("   ")
+        assertNull(BuildVariant.iosDeviceId)
+    }
+
+    @Test
+    fun `iosDeviceId persists independently of initLocalEmulator state`() {
+        // Boot order in iOSApp.swift sets deviceId BEFORE doInitKoin's
+        // emulator flag — verify the deviceId isn't clobbered by a
+        // subsequent initLocalEmulator(false) reset.
+        BuildVariant.initIosDeviceId("device-uuid-1")
+        BuildVariant.initLocalEmulator(value = false, devPersonasPassword = null)
+        assertEquals("device-uuid-1", BuildVariant.iosDeviceId)
+    }
+
+    @Test
+    fun `all build-time slots cleared on toggle to non-emulator without args`() {
+        BuildVariant.initLocalEmulator(
+            value = true,
+            devPersonasPassword = "pw",
+            googleWebClientId = "client-id",
+        )
+        BuildVariant.initLocalEmulator(false)
+        assertNull(BuildVariant.localDevPersonasPassword)
+        assertNull(BuildVariant.googleWebClientId)
+    }
+
+    @Test
+    fun `isDevAffordancesVisible is false on prod regardless of credential presence`() {
+        // Operator directive 2026-06-01 — persona picker MUST NOT appear
+        // on prod even if a misconfigured build somehow set
+        // DEV_QA_PERSONAS_PASSWORD. Defence-in-depth lock-in. Replaces the
+        // pre-removal `ignores credential presence` test that depended on
+        // the now-deleted devEmail/devPassword/isDevSignInAvailable surface.
+        BuildVariant.initBuildInfo(environment = "prod", buildVersion = "?")
+        BuildVariant.initLocalEmulator(value = true, devPersonasPassword = "lk")
+        assertFalse(BuildVariant.isDevAffordancesVisible)
+    }
+
+    @Test
+    fun `isPersonaPickerAvailable is false when localDevPersonasPassword is null`() {
+        BuildVariant.initLocalEmulator(value = false)
+        assertFalse(BuildVariant.isPersonaPickerAvailable)
+    }
+
+    @Test
+    fun `isPersonaPickerAvailable is true when localDevPersonasPassword is non-empty`() {
+        BuildVariant.initLocalEmulator(value = true, devPersonasPassword = "p")
+        assertTrue(BuildVariant.isPersonaPickerAvailable)
+    }
+
+    @Test
+    fun `isPersonaPickerAvailable does NOT depend on environment string`() {
+        // Drift catch: the credential-presence gate is independent of the
+        // visibility gate so the inner click handler can detect a
+        // misconfigured-prod-with-baked-password scenario distinctly from
+        // a configured-prod-without-password.
+        BuildVariant.initBuildInfo(environment = "prod", buildVersion = "?")
+        BuildVariant.initLocalEmulator(value = false, devPersonasPassword = "lk")
+        assertTrue(BuildVariant.isPersonaPickerAvailable)
+        // But isDevAffordancesVisible still rejects on prod — see test above.
+        assertFalse(BuildVariant.isDevAffordancesVisible)
+    }
+
+    // ── PreviewWatermark build-info slots ──
+    //
+    // The non-prod watermark overlay reads `environment` and `buildVersion`
+    // from BuildVariant. Defaults must fail-safe to "prod" / "?" so a
+    // misconfigured platform initialiser does NOT show the watermark on
+    // a real production build (false positives erode trust in the
+    // signal); a missed watermark on a misconfigured non-prod build is
+    // visually obvious during dev so it self-corrects.
+
+    @Test
+    fun `environment defaults to prod for fail-safe production behaviour`() {
+        // Reset is via initLocalEmulator(false) only — environment slot
+        // must default to "prod" without any initialiser call.
+        assertEquals("prod", BuildVariant.environment)
+    }
+
+    @Test
+    fun `buildVersion defaults to placeholder so initialiser absence is visible`() {
+        assertEquals("?", BuildVariant.buildVersion)
+    }
+
+    @Test
+    fun `initBuildInfo sets environment to local`() {
+        BuildVariant.initBuildInfo(environment = "local", buildVersion = "1.0.0 (1)")
+        assertEquals("local", BuildVariant.environment)
+    }
+
+    @Test
+    fun `initBuildInfo sets environment to dev`() {
+        BuildVariant.initBuildInfo(environment = "dev", buildVersion = "1.2.3 (456)")
+        assertEquals("dev", BuildVariant.environment)
+    }
+
+    @Test
+    fun `initBuildInfo sets environment to prod`() {
+        BuildVariant.initBuildInfo(environment = "prod", buildVersion = "2.0.0 (789)")
+        assertEquals("prod", BuildVariant.environment)
+    }
+
+    @Test
+    fun `initBuildInfo captures buildVersion verbatim`() {
+        BuildVariant.initBuildInfo(environment = "dev", buildVersion = "1.2.3 (456)")
+        assertEquals("1.2.3 (456)", BuildVariant.buildVersion)
+    }
+
+    @Test
+    fun `initBuildInfo coerces empty environment to prod for safety`() {
+        // Defends against an iOS bridge bug that forwards "" — the
+        // PreviewWatermark must NOT show on prod, so an empty
+        // environment string falls back to "prod" (not "" rendered as
+        // an empty badge).
+        BuildVariant.initBuildInfo(environment = "", buildVersion = "1.0")
+        assertEquals("prod", BuildVariant.environment)
+    }
+
+    @Test
+    fun `initBuildInfo coerces blank environment to prod`() {
+        BuildVariant.initBuildInfo(environment = "   ", buildVersion = "1.0")
+        assertEquals("prod", BuildVariant.environment)
+    }
+
+    @Test
+    fun `initBuildInfo coerces empty buildVersion to placeholder`() {
+        BuildVariant.initBuildInfo(environment = "dev", buildVersion = "")
+        assertEquals("?", BuildVariant.buildVersion)
+    }
+
+    @Test
+    fun `isPreviewBuild returns false for prod`() {
+        BuildVariant.initBuildInfo(environment = "prod", buildVersion = "2.0.0 (789)")
+        assertFalse(BuildVariant.isPreviewBuild)
+    }
+
+    @Test
+    fun `isPreviewBuild returns true for dev`() {
+        BuildVariant.initBuildInfo(environment = "dev", buildVersion = "1.2.3 (456)")
+        assertTrue(BuildVariant.isPreviewBuild)
+    }
+
+    @Test
+    fun `isPreviewBuild returns true for local`() {
+        BuildVariant.initBuildInfo(environment = "local", buildVersion = "1.0.0 (1)")
+        assertTrue(BuildVariant.isPreviewBuild)
+    }
+
+    @Test
+    fun `build info slots persist independently of initLocalEmulator`() {
+        // Boot order in MainActivity / iOSApp may interleave: emulator
+        // flag set first, then build info, OR the other way round.
+        // Verify neither slot clobbers the other.
+        BuildVariant.initBuildInfo(environment = "dev", buildVersion = "1.2.3 (456)")
+        BuildVariant.initLocalEmulator(value = false)
+        assertEquals("dev", BuildVariant.environment)
+        assertEquals("1.2.3 (456)", BuildVariant.buildVersion)
+    }
+
+    // ── Device info for watermark ──
+    //
+    // The watermark also surfaces the device model + OS so leaked
+    // screenshots can be tied back to specific devices (e.g. for
+    // QA on a physical phone, or an iOS simulator vs a real iPhone).
+    // Android passes `${Build.MANUFACTURER} ${Build.MODEL} · Android
+    // ${Build.VERSION.RELEASE}`; iOS passes `${UIDevice.model} · iOS
+    // ${UIDevice.systemVersion}`. Default `"?"` keeps the format
+    // identical between platforms when an initialiser is missing.
+
+    @Test
+    fun `deviceInfo defaults to placeholder so missing initialiser is visible`() {
+        assertEquals("?", BuildVariant.deviceInfo)
+    }
+
+    @Test
+    fun `initBuildInfo captures deviceInfo verbatim`() {
+        BuildVariant.initBuildInfo(
+            environment = "dev",
+            buildVersion = "1.2.3 (456)",
+            deviceInfo = "Pixel 6 · Android 14",
+        )
+        assertEquals("Pixel 6 · Android 14", BuildVariant.deviceInfo)
+    }
+
+    @Test
+    fun `initBuildInfo coerces empty deviceInfo to placeholder`() {
+        BuildVariant.initBuildInfo(environment = "dev", buildVersion = "1.0", deviceInfo = "")
+        assertEquals("?", BuildVariant.deviceInfo)
+    }
+
+    @Test
+    fun `initBuildInfo coerces blank deviceInfo to placeholder`() {
+        BuildVariant.initBuildInfo(environment = "dev", buildVersion = "1.0", deviceInfo = "   ")
+        assertEquals("?", BuildVariant.deviceInfo)
+    }
+
+    @Test
+    fun `initBuildInfo deviceInfo defaults to placeholder when omitted`() {
+        // Backward compat: existing call sites that omit deviceInfo
+        // should not break. The default-arg value yields the placeholder.
+        BuildVariant.initBuildInfo(environment = "dev", buildVersion = "1.0")
+        assertEquals("?", BuildVariant.deviceInfo)
+    }
+
+    // ── PreviewWatermarkConstants — UX guarantees ──
+    //
+    // The watermark must remain semi-transparent so the underlying UI
+    // is legible. The user explicitly required: "we still need to be
+    // able to see the app". The contract is alpha ≤ 0.5 (clearly
+    // see-through) AND alpha ≥ 0.1 (not so faded it disappears on
+    // light backgrounds). Tested as a constant rather than an
+    // instrumented Compose render so the contract is enforceable from
+    // the JVM unit-test layer that runs in pre-push and CI.
+
+    @Test
+    fun `watermark badge alpha is at most half-opaque`() {
+        assertTrue(PreviewWatermarkConstants.BADGE_BACKGROUND_ALPHA <= 0.5f)
+    }
+
+    @Test
+    fun `watermark badge alpha is at least faintly visible`() {
+        assertTrue(PreviewWatermarkConstants.BADGE_BACKGROUND_ALPHA >= 0.1f)
+    }
+
+    // ── BuildVariantConfig atomic holder (B6.13) ──
+    //
+    // Pre-B6.13, BuildVariant exposed multiple independent volatile vars
+    // and `initLocalEmulator(...)` wrote them sequentially. A reader on
+    // another thread could observe an intermediate state. Wrapping into
+    // a single immutable `BuildVariantConfig` and replacing the holder
+    // reference per init closes the window: the reference swap is the
+    // single visible boundary, so a reader sees either the entire old
+    // state or the entire new state, never a half-update.
+
+    @Test
+    fun `config getter exposes the immutable holder snapshot`() {
+        // The holder MUST be a single object — readers can capture it
+        // and navigate fields without seeing a mid-init partial write.
+        val snapshot = BuildVariant.config
+        assertEquals(snapshot.isLocalEmulator, BuildVariant.isLocalEmulator)
+        assertEquals(snapshot.environment, BuildVariant.environment)
+    }
+
+    @Test
+    fun `initLocalEmulator swaps a fresh config instance`() {
+        // Reference inequality after init — the sequential-write
+        // architecture would have updated the same shared object;
+        // swap-the-reference architecture produces a new instance.
+        val before = BuildVariant.config
+        BuildVariant.initLocalEmulator(value = true, devPersonasPassword = "x")
+        val after = BuildVariant.config
+        assertTrue(before !== after, "init must swap the holder reference, not mutate in place")
+    }
+
+    @Test
+    fun `initLocalEmulator updates all related fields atomically in the same swap`() {
+        // The race-window concern: a reader that captures `config`
+        // BEFORE init must see all fields as their old values;
+        // a reader that captures AFTER init must see all as new.
+        // No mid-state where some are old and some are new.
+        BuildVariant.initLocalEmulator(false)
+        val before = BuildVariant.config
+        assertFalse(before.isLocalEmulator)
+        assertNull(before.localDevPersonasPassword)
+        assertNull(before.googleWebClientId)
+
+        val seedPwd = "localdev123"
+        BuildVariant.initLocalEmulator(
+            value = true,
+            devPersonasPassword = seedPwd,
+            googleWebClientId = "client-id",
+        )
+        val after = BuildVariant.config
+        assertTrue(after.isLocalEmulator)
+        assertEquals(seedPwd, after.localDevPersonasPassword)
+        assertEquals("client-id", after.googleWebClientId)
+        // The pre-init capture is unchanged — proving immutability.
+        assertFalse(before.isLocalEmulator, "Pre-init snapshot must NOT be mutated by a later init call")
+        assertNull(before.localDevPersonasPassword)
+    }
+
+    @Test
+    fun `initBuildInfo swaps a fresh config without disturbing emulator slots`() {
+        // Cross-init isolation: initBuildInfo updates env/build/device,
+        // initLocalEmulator updates the emulator slots. Each must
+        // preserve the other's state on its swap.
+        BuildVariant.initLocalEmulator(
+            value = true,
+            devPersonasPassword = "p",
+            googleWebClientId = "c",
+        )
+        val emulatorState = BuildVariant.config
+        BuildVariant.initBuildInfo(environment = "dev", buildVersion = "1.0 (1)", deviceInfo = "iPhone")
+        val combined = BuildVariant.config
+        assertTrue(combined.isLocalEmulator, "initBuildInfo must NOT clear emulator slot")
+        assertEquals("p", combined.localDevPersonasPassword)
+        assertEquals("dev", combined.environment)
+        assertEquals("1.0 (1)", combined.buildVersion)
+        assertEquals("iPhone", combined.deviceInfo)
+        // Pre-initBuildInfo snapshot is preserved (immutable).
+        assertEquals("prod", emulatorState.environment)
+    }
+
+    // ── isGoogleSignInAvailable (B6.14) ──
+    //
+    // Local-flavour builds talk to Firebase emulators without a real
+    // Google OAuth web client. Tapping the Google Sign-In button on
+    // local previously hit `performGoogleSignIn` with the placeholder
+    // (Android: `"placeholder-local"`, iOS: `nil`) and surfaced a
+    // cryptic Google framework error. The button must hide on builds
+    // where googleWebClientId is unset / a placeholder. SignInScreen
+    // reads this convenience property to decide whether to render.
+
+    @Test
+    fun `isGoogleSignInAvailable returns false when googleWebClientId is null`() {
+        BuildVariant.initLocalEmulator(false, googleWebClientId = null)
+        assertFalse(BuildVariant.isGoogleSignInAvailable)
+    }
+
+    @Test
+    fun `isGoogleSignInAvailable returns true when googleWebClientId is a real OAuth ID`() {
+        BuildVariant.initLocalEmulator(
+            value = false,
+            googleWebClientId = "881846974606-abcdef.apps.googleusercontent.com",
+        )
+        assertTrue(BuildVariant.isGoogleSignInAvailable)
+    }
+
+    @Test
+    fun `isGoogleSignInAvailable returns false when googleWebClientId is empty`() {
+        // Android local flavour now sets `BuildConfig.WEB_CLIENT_ID = ""`
+        // (was `"placeholder-local"`); empty coerces to null in the
+        // BuildVariant slot, so the Google button hides on local.
+        BuildVariant.initLocalEmulator(true, googleWebClientId = "")
+        assertFalse(BuildVariant.isGoogleSignInAvailable)
+    }
+
+    @Test
+    fun `config snapshot survives subsequent inits — captured-then-mutated reader sees old state`() {
+        // The motivating use case: a Compose composable captures
+        // `config` once for a frame, navigates fields, and renders.
+        // A concurrent init MUST NOT partial-mutate that captured
+        // snapshot.
+        BuildVariant.initApiBaseUrl("http://localhost:3000")
+        val snapshot = BuildVariant.config
+        BuildVariant.initApiBaseUrl("https://dev-api.shytalk.shyden.co.uk")
+        // The snapshot the reader captured BEFORE the second init
+        // still reflects the localhost URL — its fields didn't get
+        // overwritten in place.
+        assertEquals("http://localhost:3000", snapshot.apiBaseUrl)
+        // The current config has the new URL.
+        assertEquals("https://dev-api.shytalk.shyden.co.uk", BuildVariant.apiBaseUrl)
+    }
+
+    // ── apiBaseUrl — env-aware Express API endpoint ──
+    //
+    // iOS hardcoded `http://localhost:3000` for every build, so the DEV
+    // TestFlight IPA tried to hit localhost from the user's iPhone after
+    // a successful Apple/Google sign-in and Firebase auth — the API
+    // call to `POST /api/identity/resolve` failed, the error didn't
+    // match any auth-error pattern, and AuthViewModel set
+    // `isBackendUnreachable = true`, locking the user on the "Unable to
+    // connect" screen. Android avoids this by reading `BuildConfig.API_BASE_URL`
+    // per flavour. Mirrored on iOS via this BuildVariant slot, set from
+    // Swift in `iOSApp.swift`'s `#if DEBUG / #else` block before
+    // `doInitKoin` runs.
+    //
+    // Default `null` so a misconfigured initialiser is loud at the
+    // Koin factory site (downstream `?: error(...)`) rather than
+    // silently posting to nowhere.
+
+    @Test
+    fun `apiBaseUrl defaults to null so misconfiguration fails loudly`() {
+        assertNull(BuildVariant.apiBaseUrl)
+    }
+
+    @Test
+    fun `initApiBaseUrl captures localhost for local emulator builds`() {
+        BuildVariant.initApiBaseUrl("http://localhost:3000")
+        assertEquals("http://localhost:3000", BuildVariant.apiBaseUrl)
+    }
+
+    @Test
+    fun `initApiBaseUrl captures dev https URL for TestFlight builds`() {
+        BuildVariant.initApiBaseUrl("https://dev-api.shytalk.shyden.co.uk")
+        assertEquals("https://dev-api.shytalk.shyden.co.uk", BuildVariant.apiBaseUrl)
+    }
+
+    @Test
+    fun `initApiBaseUrl coerces empty string to null`() {
+        // Mirrors the existing slot pattern (devPersonasPassword/googleWebClientId):
+        // an empty BuildConfig field on Android or empty Swift bridge value on iOS
+        // should NOT be passed to the HTTP client — it would post to "$path"
+        // (relative URL) which Ktor either errors on or silently rewrites to
+        // the wrong scheme. Coerce to null so the Koin factory's `?: error(...)`
+        // gate trips instead.
+        BuildVariant.initApiBaseUrl("")
+        assertNull(BuildVariant.apiBaseUrl)
+    }
+
+    @Test
+    fun `initApiBaseUrl coerces blank string to null`() {
+        BuildVariant.initApiBaseUrl("   ")
+        assertNull(BuildVariant.apiBaseUrl)
+    }
+
+    @Test
+    fun `initApiBaseUrl can be cleared by passing null`() {
+        BuildVariant.initApiBaseUrl("http://localhost:3000")
+        BuildVariant.initApiBaseUrl(null)
+        assertNull(BuildVariant.apiBaseUrl)
+    }
+
+    // ── isPersonaPickerAvailable matrix (PR B v2 — persona picker) ──
+
+    @Test
+    fun `localDevPersonasPassword defaults to null`() {
+        BuildVariant.initLocalEmulator(false)
+        assertNull(BuildVariant.localDevPersonasPassword)
+    }
+
+    @Test
+    fun `localDevPersonasPassword captures non-empty value`() {
+        BuildVariant.initLocalEmulator(value = true, devPersonasPassword = "spw")
+        assertEquals("spw", BuildVariant.localDevPersonasPassword)
+    }
+
+    @Test
+    fun `localDevPersonasPassword coerces empty string to null`() {
+        // Android's BuildConfig.DEV_QA_PERSONAS_PASSWORD is "" on prod
+        // and on dev builds without the env var. Setter must coerce
+        // so isPersonaPickerAvailable reads false uniformly.
+        BuildVariant.initLocalEmulator(value = true, devPersonasPassword = "")
+        assertNull(BuildVariant.localDevPersonasPassword)
+    }
+
+    @Test
+    fun `isPersonaPickerAvailable defaults to false`() {
+        BuildVariant.initLocalEmulator(false)
+        assertFalse(BuildVariant.isPersonaPickerAvailable)
+    }
+
+    @Test
+    fun `isPersonaPickerAvailable is true when shared password is baked`() {
+        BuildVariant.initLocalEmulator(value = true, devPersonasPassword = "spw")
+        assertTrue(BuildVariant.isPersonaPickerAvailable)
+    }
+
+    @Test
+    fun `isPersonaPickerAvailable is false when password is empty string`() {
+        BuildVariant.initLocalEmulator(value = true, devPersonasPassword = "")
+        assertFalse(
+            BuildVariant.isPersonaPickerAvailable,
+            "empty string must not enable the picker (fail-closed)",
+        )
+    }
+
+    @Test
+    fun `isPersonaPickerAvailable resets when shared password is cleared`() {
+        BuildVariant.initLocalEmulator(value = true, devPersonasPassword = "spw")
+        assertTrue(BuildVariant.isPersonaPickerAvailable)
+
+        BuildVariant.initLocalEmulator(value = false)
+        assertFalse(
+            BuildVariant.isPersonaPickerAvailable,
+            "clearing the shared password must reset the derived flag",
+        )
+    }
+
+    // ── isLocal / isProd convenience flags ──
+    // Operator directive 2026-05-29: SignInScreen reads environment-based
+    // gates to decide button visibility (separate from credential-based
+    // functionality gates). isLocal / isProd are the source of truth for
+    // those decisions.
+
+    @Test
+    fun `isLocal is true when environment is local`() {
+        BuildVariant.initBuildInfo(environment = "local", buildVersion = "1.0")
+        assertTrue(BuildVariant.isLocal)
+    }
+
+    @Test
+    fun `isLocal is false when environment is dev`() {
+        BuildVariant.initBuildInfo(environment = "dev", buildVersion = "1.0")
+        assertFalse(BuildVariant.isLocal)
+    }
+
+    @Test
+    fun `isLocal is false when environment is prod`() {
+        BuildVariant.initBuildInfo(environment = "prod", buildVersion = "1.0")
+        assertFalse(BuildVariant.isLocal)
+    }
+
+    @Test
+    fun `isLocal is false on the fail-safe default (uninitialised env defaults to prod)`() {
+        // The default holder has environment="prod" so isLocal must be
+        // false without any explicit initialiser. Pins the fail-safe
+        // semantic so a missed init never enables local-only behaviours
+        // (like the "Sign-in not available on local environment" toast)
+        // on a real production build.
+        assertFalse(BuildVariant.isLocal)
+    }
+
+    @Test
+    fun `isProd is true on the fail-safe default`() {
+        assertTrue(BuildVariant.isProd)
+    }
+
+    @Test
+    fun `isProd is true when environment is prod`() {
+        BuildVariant.initBuildInfo(environment = "prod", buildVersion = "1.0")
+        assertTrue(BuildVariant.isProd)
+    }
+
+    @Test
+    fun `isProd is false when environment is dev`() {
+        BuildVariant.initBuildInfo(environment = "dev", buildVersion = "1.0")
+        assertFalse(BuildVariant.isProd)
+    }
+
+    @Test
+    fun `isProd is false when environment is local`() {
+        BuildVariant.initBuildInfo(environment = "local", buildVersion = "1.0")
+        assertFalse(BuildVariant.isProd)
+    }
+
+    @Test
+    fun `isLocal and isProd are mutually exclusive across all known envs`() {
+        // Defensive: a future env value (e.g. "staging") must not be
+        // simultaneously local AND prod. The current matrix covers the
+        // three named envs (local / dev / prod) — adding a new env to
+        // BuildVariant must update this matrix.
+        for (env in listOf("local", "dev", "prod", "")) {
+            BuildVariant.initBuildInfo(environment = env, buildVersion = "1.0")
+            assertFalse(
+                BuildVariant.isLocal && BuildVariant.isProd,
+                "isLocal && isProd must never both be true (env='$env')",
+            )
+        }
+    }
+
+    // ── isOAuthSignInVisible / isOAuthSignInFunctional ──
+    // Operator directive 2026-05-29: Google + Apple buttons are visible
+    // on EVERY flavor. Tapping on local surfaces a "Sign-in not available
+    // on local environment" snackbar instead of attempting the real OAuth
+    // flow (which would fail against the Firebase Auth emulator).
+
+    @Test
+    fun `isOAuthSignInVisible is true on all flavors (always render buttons)`() {
+        for (env in listOf("local", "dev", "prod")) {
+            BuildVariant.initBuildInfo(environment = env, buildVersion = "1.0")
+            assertTrue(
+                BuildVariant.isOAuthSignInVisible,
+                "Google + Apple buttons must render on every flavor (env='$env')",
+            )
+        }
+    }
+
+    @Test
+    fun `isOAuthSignInVisible is true on the fail-safe default (no init called)`() {
+        // Defaults to prod (renders the buttons functionally). Visibility
+        // gate is still true so a misconfigured platform initialiser
+        // never accidentally hides the buttons.
+        assertTrue(BuildVariant.isOAuthSignInVisible)
+    }
+
+    @Test
+    fun `isOAuthSignInFunctional is false when environment is local`() {
+        BuildVariant.initBuildInfo(environment = "local", buildVersion = "1.0")
+        assertFalse(
+            BuildVariant.isOAuthSignInFunctional,
+            "local Firebase Auth emulator can't redeem real OAuth tokens — tap must surface the friendly snackbar",
+        )
+    }
+
+    @Test
+    fun `isOAuthSignInFunctional is true on dev`() {
+        BuildVariant.initBuildInfo(environment = "dev", buildVersion = "1.0")
+        assertTrue(BuildVariant.isOAuthSignInFunctional)
+    }
+
+    @Test
+    fun `isOAuthSignInFunctional is true on prod`() {
+        BuildVariant.initBuildInfo(environment = "prod", buildVersion = "1.0")
+        assertTrue(BuildVariant.isOAuthSignInFunctional)
+    }
+
+    @Test
+    fun `isOAuthSignInFunctional is true on the fail-safe default (defaults to prod)`() {
+        // Critical fail-safe: a missing initialiser must NOT silently
+        // disable OAuth on real prod. Defaults to "prod" → functional.
+        assertTrue(BuildVariant.isOAuthSignInFunctional)
+    }
+
+    // ── isDevAffordancesVisible — persona picker gate ──
+    // Operator directive 2026-05-29 (single-account dev sign-in removed
+    // 2026-06-01): the persona picker is visible on local + dev, NEVER
+    // on prod regardless of any credential misconfiguration. Defence-
+    // in-depth against a prod APK accidentally built with
+    // DEV_QA_PERSONAS_PASSWORD env var set.
+
+    @Test
+    fun `isDevAffordancesVisible is true on local`() {
+        BuildVariant.initBuildInfo(environment = "local", buildVersion = "1.0")
+        assertTrue(BuildVariant.isDevAffordancesVisible)
+    }
+
+    @Test
+    fun `isDevAffordancesVisible is true on dev`() {
+        BuildVariant.initBuildInfo(environment = "dev", buildVersion = "1.0")
+        assertTrue(BuildVariant.isDevAffordancesVisible)
+    }
+
+    @Test
+    fun `isDevAffordancesVisible is FALSE on prod`() {
+        BuildVariant.initBuildInfo(environment = "prod", buildVersion = "1.0")
+        assertFalse(
+            BuildVariant.isDevAffordancesVisible,
+            "persona picker must NEVER appear on prod — operator directive 2026-05-29",
+        )
+    }
+
+    @Test
+    fun `isDevAffordancesVisible is FALSE on the fail-safe default`() {
+        // Critical: a missing initialiser must NEVER expose dev affordances
+        // on prod. The default environment="prod" → visible=false.
+        assertFalse(
+            BuildVariant.isDevAffordancesVisible,
+            "fail-safe default (uninitialised env) must hide dev affordances",
+        )
+    }
+
+    @Test
+    fun `isDevAffordancesVisible is FALSE on an unknown env value`() {
+        // Defensive: an unknown env ("staging", "qa", typo, etc.) must
+        // also hide the dev affordances. Only the explicit allow-list
+        // ("local", "dev") enables them.
+        BuildVariant.initBuildInfo(environment = "staging", buildVersion = "1.0")
+        assertFalse(
+            BuildVariant.isDevAffordancesVisible,
+            "unknown env values must NOT expose dev affordances (fail-closed allow-list)",
+        )
+    }
+
+    @Test
+    fun `isDevAffordancesVisible ignores persona-password presence on prod (visibility is env-only)`() {
+        // Critical: a prod build with the persona password accidentally
+        // baked in (env var leak, misconfigured CI) must STILL hide the
+        // picker. The visibility gate is purely env-based; password
+        // presence is the functional gate inside the click handler.
+        // Post-2026-06-01 the single-account dev-sign-in fields were
+        // removed — only devPersonasPassword remains as a leak surface.
+        BuildVariant.initBuildInfo(environment = "prod", buildVersion = "1.0")
+        BuildVariant.initLocalEmulator(
+            value = false,
+            devPersonasPassword = "leaked",
+        )
+        assertFalse(
+            BuildVariant.isDevAffordancesVisible,
+            "credential leak on prod must NOT render the dev affordances — env gate is supreme",
+        )
+        assertTrue(
+            BuildVariant.isPersonaPickerAvailable,
+            "functional gate still reports available; visibility gate is what hides the picker",
+        )
+    }
+}

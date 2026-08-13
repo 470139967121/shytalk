@@ -1,0 +1,328 @@
+name: Playwright Tests
+
+on:
+  workflow_call:
+    inputs:
+      web:
+        description: 'Web (all, none, or e.g. chromium,firefox,mobile-chrome)'
+        type: string
+        default: 'all'
+      parallel:
+        description: 'Run matrix jobs in parallel'
+        type: boolean
+        default: true
+      ref:
+        description: 'Git ref to test'
+        type: string
+        required: true
+      report_env:
+        description: 'Report environment: pr or deploy'
+        type: string
+        default: 'pr'
+
+  workflow_dispatch:
+    inputs:
+      web:
+        description: 'Web (all, none, or e.g. chromium,firefox,mobile-chrome)'
+        type: string
+        default: 'all'
+      parallel:
+        description: 'Run matrix jobs in parallel'
+        type: boolean
+        default: true
+      ref:
+        description: 'Git ref to test (default: main)'
+        type: string
+        default: 'main'
+      report_env:
+        description: 'Report environment: pr or deploy'
+        type: string
+        default: 'pr'
+
+permissions:
+  contents: write
+
+concurrency:
+  # Per-ref scoping: each PR / branch has its own queue, so independent PRs
+  # don't serialize through one slot. Without this, three concurrent PRs
+  # cause queue-cancellation: GitHub Actions allows at most ONE pending run
+  # per group, so the 3rd arrival cancels the 2nd's pending run, surfacing as
+  # `playwright-web / Resolve Inputs: CANCELLED → PR Gate: FAILURE` on PRs
+  # that did nothing wrong. (Observed 2026-05-09 against PR #568, #570.)
+  # cancel-in-progress: true so a newer commit on the same PR
+  # supersedes the older one's in-progress run. pr-checks.yml's
+  # cancellation does NOT propagate into reusable workflows. Pinned by
+  # express-api/tests/scripts/reusable-workflow-concurrency.test.js.
+  group: playwright-tests-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # ── Resolve inputs into browser matrix ──────────────────────
+  resolve-inputs:
+    name: Resolve Inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      run_web: ${{ steps.resolve.outputs.run_web }}
+      web_matrix: ${{ steps.resolve.outputs.web_matrix }}
+      parallel: ${{ steps.resolve.outputs.parallel }}
+      ref: ${{ steps.resolve.outputs.ref }}
+    steps:
+      - name: Resolve browsers and ref
+        id: resolve
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const WEB_ALL = [
+              { project: 'chromium', browser: 'Chromium', viewport: '1280x720' },
+              { project: 'firefox', browser: 'Firefox', viewport: '1280x720' },
+              { project: 'webkit', browser: 'WebKit', viewport: '1280x720' },
+              { project: 'mobile-chrome', browser: 'Mobile Chrome (Pixel 5)', viewport: '393x851' },
+              { project: 'mobile-safari', browser: 'Mobile Safari (iPhone 13)', viewport: '390x844' },
+            ];
+
+            const web = '${{ inputs.web }}' || 'all';
+            const parallel = '${{ inputs.parallel }}' !== 'false';
+            const ref = '${{ inputs.ref }}' || context.sha;
+
+            function filter(input, catalog, keyFn) {
+              if (input === 'none' || input === 'false') return [];
+              if (input === 'all' || input === 'true') return catalog;
+              const selected = input.split(',').map(s => s.trim().toLowerCase());
+              return catalog.filter(item => selected.includes(keyFn(item)));
+            }
+
+            const webMatrix = filter(web, WEB_ALL, d => d.project);
+
+            core.setOutput('ref', ref);
+            core.setOutput('parallel', String(parallel));
+            core.setOutput('run_web', String(webMatrix.length > 0));
+            core.setOutput('web_matrix', JSON.stringify({ include: webMatrix }));
+
+            console.log(`Web: ${webMatrix.length} browsers`);
+
+  # ── Prepare Playwright browsers ─────────────────────────────
+  prepare-playwright:
+    name: Prepare Playwright
+    needs: [resolve-inputs]
+    if: always() && needs.resolve-inputs.result == 'success' && needs.resolve-inputs.outputs.run_web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.resolve-inputs.outputs.ref }}
+
+      - uses: ./.github/actions/setup-node
+        with:
+          cache: 'npm'
+
+      - name: Get Playwright version
+        id: pw
+        run: echo "version=$(npx playwright --version)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-browsers-${{ steps.pw.outputs.version }}
+
+      - name: Install Playwright browsers
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: npx playwright install
+
+    outputs:
+      pw-version: ${{ steps.pw.outputs.version }}
+
+  # ── Playwright Web Tests ────────────────────────────────────
+  test-playwright:
+    name: "Playwright (${{ matrix.project }})"
+    needs: [resolve-inputs, prepare-playwright]
+    if: always() && needs.prepare-playwright.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.resolve-inputs.outputs.web_matrix) }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.resolve-inputs.outputs.ref }}
+
+      - uses: ./.github/actions/setup-jdk-gradle
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Restore Playwright browsers from cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-browsers-${{ needs.prepare-playwright.outputs.pw-version }}
+
+      # Always run install — it's idempotent. Playwright checks the on-disk
+      # browser revision against the package's expected revision and only
+      # downloads when they don't match. The cache just speeds up the
+      # no-op path. WITHOUT this step, a cache-hit that returned a stale or
+      # incomplete blob (different chromium revision than the installed
+      # `playwright` package expects, or a partial extraction) leaves the
+      # runner with no usable browser and every test fails in 2ms with
+      # `browserType.launch: Executable doesn't exist`. Conditional-on-
+      # cache-miss is NOT enough — the failure is cache-hit-with-stale-
+      # content, not cache-miss.
+      - name: Install Playwright browsers (idempotent)
+        run: npx playwright install
+
+      - name: Cache apt packages for Playwright
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: /var/cache/apt/archives
+          key: apt-playwright-${{ needs.prepare-playwright.outputs.pw-version }}
+
+      - name: Install system dependencies
+        run: npx playwright install-deps
+
+      - uses: ./.github/actions/start-local-services
+
+      - uses: ./.github/actions/start-firebase-emulators
+
+      - name: Install Express API and seed data
+        run: |
+          cd express-api && npm ci
+          NODE_PATH=./node_modules NODE_ENV=local node ../local/seed.js
+
+      - name: Start Express API
+        run: |
+          cd express-api
+          NODE_ENV=local TEST_API_KEY=local-test-key FIREBASE_WEB_API_KEY=fake-ci-key FIREBASE_PROJECT_ID=demo-shytalk node src/index.js &
+          until curl -s http://localhost:3000/api/health > /dev/null 2>&1; do sleep 1; done
+
+      - name: Configure admin panel and portal for local emulators
+        run: |
+          cat > public/admin/config.js << 'EOF'
+          window.SHYTALK_CONFIG = {
+            API_BASE: "http://localhost:3000",
+            USE_EMULATORS: true,
+            FIREBASE_CONFIG: {
+              apiKey: "fake-api-key",
+              authDomain: "localhost",
+              projectId: "demo-shytalk"
+            }
+          };
+          EOF
+          cat > public/portal/config.js << 'EOF'
+          window.PORTAL_CONFIG = {
+            API_BASE: "http://localhost:3000",
+            USE_EMULATORS: true,
+            FIREBASE_CONFIG: {
+              apiKey: "fake-api-key",
+              authDomain: "localhost",
+              projectId: "demo-shytalk"
+            }
+          };
+          EOF
+          # Roadmap page references /js/roadmap-config.js, which is gitignored
+          # because the prod/dev deploys sed-substitute the API key into it
+          # from the .example template. CI doesn't run those deploy steps, so
+          # without this stub the file 404s and the console-errors test fails
+          # (the previous blanket "Failed to load resource" mask was tightened
+          # in this PR — the test now surfaces real broken-asset bugs).
+          cat > public/js/roadmap-config.js << 'EOF'
+          window.ROADMAP_FIREBASE_CONFIG = {
+            apiKey: "fake-api-key",
+            authDomain: "localhost",
+            projectId: "demo-shytalk"
+          };
+          EOF
+
+      - name: Serve admin panel
+        run: npx serve public -l 8888 &
+
+      - name: Run Playwright tests (${{ matrix.project }})
+        env:
+          WEB_BASE_URL: http://localhost:8888
+          API_BASE_URL: http://localhost:3000
+          ADMIN_EMAIL: claude-test@shytalk.dev
+          ADMIN_PASSWORD: localdev123
+          TEST_API_KEY: local-test-key
+          ALLURE_ENABLED: 'true'
+          ALLURE_PROJECT: ${{ matrix.project }}
+        run: npx playwright test --project=${{ matrix.project }} --reporter=list,allure-playwright,html
+
+      - name: Cleanup Docker containers
+        if: always()
+        run: |
+          docker logs livekit 2>/dev/null || true
+          docker logs minio 2>/dev/null || true
+          docker logs mailpit 2>/dev/null || true
+          docker rm -f livekit minio mailpit 2>/dev/null || true
+
+      - name: Write environment.properties
+        if: always()
+        run: |
+          DIR="allure-results/${{ matrix.project }}"
+          mkdir -p "$DIR"
+          sed 's/^ *//' > "$DIR/environment.properties" <<'PWEOF'
+          platform=Web
+          browser=${{ matrix.browser }}
+          viewport=${{ matrix.viewport }}
+          base_url=localhost:8888
+          PWEOF
+
+      - name: Upload Allure results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: allure-results-playwright-${{ matrix.project }}
+          path: allure-results/
+          retention-days: 14
+
+      - name: Upload failure screenshots and traces
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: failure()
+        with:
+          name: playwright-failures-${{ matrix.project }}
+          path: test-results/
+          retention-days: 7
+
+  # ── Summary ─────────────────────────────────────────────────
+  playwright-summary:
+    name: Playwright Summary
+    needs: [resolve-inputs, test-playwright]
+    if: always() && needs.resolve-inputs.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check results
+        run: |
+          echo "## Playwright Test Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          PW="${{ needs.test-playwright.result }}"
+
+          echo "- Playwright Web: $PW" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$PW" != "success" ] && [ "$PW" != "skipped" ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "**Playwright tests failed.**" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+  # ── Generate Allure Report ──────────────────────────────────
+  allure-report:
+    needs: [resolve-inputs, test-playwright]
+    if: always() && needs.resolve-inputs.result == 'success'
+    uses: ./.github/workflows/allure-report.yml
+    with:
+      suite_name: playwright
+      report_env: ${{ inputs.report_env || 'pr' }}
+      artifact_pattern: allure-results-*

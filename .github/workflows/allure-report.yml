@@ -1,0 +1,214 @@
+name: Generate Allure Report
+
+on:
+  workflow_call:
+    inputs:
+      suite_name:
+        description: "Test suite name (e.g. android-e2e, playwright, express, kotlin)"
+        required: true
+        type: string
+      report_env:
+        description: "Report environment (pr, deploy)"
+        required: false
+        type: string
+        default: "pr"
+      artifact_pattern:
+        description: "Glob pattern for downloading allure result artifacts"
+        required: false
+        type: string
+        default: "allure-results-*"
+      max_history_runs:
+        description: "Number of historical runs to retain"
+        required: false
+        type: number
+        default: 10
+
+  workflow_dispatch:
+    inputs:
+      suite_name:
+        description: "Test suite name (e.g. android-e2e, playwright, express, kotlin)"
+        required: true
+        type: string
+      report_env:
+        description: "Report environment (pr, deploy)"
+        required: false
+        type: string
+        default: "pr"
+      artifact_pattern:
+        description: "Glob pattern for downloading allure result artifacts"
+        required: false
+        type: string
+        default: "allure-results-*"
+      max_history_runs:
+        description: "Number of historical runs to retain"
+        required: false
+        type: string
+        default: "10"
+
+concurrency:
+  group: gh-pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  generate-report:
+    name: Generate Allure Report
+    runs-on: ubuntu-latest
+    # 20 (was 10): the playwright suite's gh-pages round-trip (history restore +
+    # report deploy) exceeds 10 min on the large gh-pages branch and was being
+    # guillotined mid-deploy. Headroom guarantee; the real perf fix (shrinking
+    # gh-pages) is tracked in SHY-0128. See SHY-0127.
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Check if report already generated for this run
+        id: check-existing
+        run: |
+          # Check gh-pages for a metadata.json with this run ID
+          EXISTING=$(curl -sf "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/${{ inputs.suite_name }}/${{ inputs.report_env }}/latest/metadata.json" 2>/dev/null | grep -o '"runId":"${{ github.run_id }}"' || echo "")
+          if [ -n "$EXISTING" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Report already generated for run ${{ github.run_id }} — skipping"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download all Allure results
+        if: steps.check-existing.outputs.skip != 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: ${{ inputs.artifact_pattern }}
+          path: allure-results-all/
+          merge-multiple: true
+
+      - name: Merge environment.properties from all test suites
+        if: steps.check-existing.outputs.skip != 'true'
+        run: |
+          MERGED="allure-results-all/environment.properties"
+          > "$MERGED"
+          find allure-results-all -name environment.properties -not -path "$MERGED" | sort | while read -r f; do
+            SUITE=$(echo "$f" | sed 's|allure-results-all/||;s|/environment.properties||;s|/|.|g')
+            while IFS= read -r line; do
+              trimmed=$(echo "$line" | sed 's/^[[:space:]]*//')
+              [ -z "$trimmed" ] && continue
+              KEY=$(echo "$trimmed" | cut -d= -f1)
+              VALUE=$(echo "$trimmed" | cut -d= -f2-)
+              echo "${SUITE}.${KEY}=${VALUE}" >> "$MERGED"
+            done < "$f"
+          done
+
+      - name: Sanitize results (strip secrets)
+        if: steps.check-existing.outputs.skip != 'true'
+        run: |
+          if [ -f .github/scripts/sanitize-allure.sh ]; then
+            bash .github/scripts/sanitize-allure.sh allure-results-all/
+          fi
+
+      - name: Install Allure CLI
+        if: steps.check-existing.outputs.skip != 'true'
+        run: |
+          curl -sL https://github.com/allure-framework/allure2/releases/download/2.32.0/allure-2.32.0.tgz | tar xz
+          echo "$PWD/allure-2.32.0/bin" >> "$GITHUB_PATH"
+
+      - name: Restore history from gh-pages
+        if: steps.check-existing.outputs.skip != 'true'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: gh-pages
+          path: gh-pages
+          # Only the trend `history/` for THIS suite/env is read (next step). A
+          # sparse cone checkout skips writing every other suite's full HTML
+          # report to disk — the bulk of this step's cost. (Does not reduce the
+          # network fetch — `filter:` would, but it overrides sparse-checkout;
+          # the fetch+deploy size is the SHY-0128 bloat concern.)
+          sparse-checkout: |
+            ${{ inputs.suite_name }}/${{ inputs.report_env }}/history
+        # Intentional: on the first run for a new suite the gh-pages
+        # branch doesn't exist yet, and a missing ref would fail the
+        # whole job. The next step's `cp ... 2>/dev/null || echo "No
+        # previous history (first run)"` already handles the missing
+        # dir gracefully, so trend tracking just degrades to "no
+        # history" for the first run, then self-heals on run 2+.
+        continue-on-error: true
+
+      - name: Copy history for trend tracking
+        if: steps.check-existing.outputs.skip != 'true'
+        run: |
+          mkdir -p allure-results-all/history
+          cp -r "gh-pages/${{ inputs.suite_name }}/${{ inputs.report_env }}/history/"* allure-results-all/history/ 2>/dev/null || echo "No previous history (first run)"
+
+      - name: Generate Allure report
+        if: steps.check-existing.outputs.skip != 'true'
+        run: allure generate allure-results-all -o allure-report --clean
+
+      - name: Archive previous run
+        if: steps.check-existing.outputs.skip != 'true'
+        run: |
+          DATE=$(date +%Y-%m-%d)
+          RUN_ID=${{ github.run_id }}
+          DEST="gh-pages/${{ inputs.suite_name }}/${{ inputs.report_env }}/runs/${DATE}-run-${RUN_ID}"
+          cp -r "gh-pages/${{ inputs.suite_name }}/${{ inputs.report_env }}/latest" "$DEST" 2>/dev/null || true
+
+      - name: Prune old runs (keep last N)
+        if: steps.check-existing.outputs.skip != 'true'
+        run: |
+          RUNS_DIR="gh-pages/${{ inputs.suite_name }}/${{ inputs.report_env }}/runs"
+          if [ -d "$RUNS_DIR" ]; then
+            ls -1d "$RUNS_DIR"/*/ 2>/dev/null | sort | head -n -${{ inputs.max_history_runs }} | xargs rm -rf 2>/dev/null || true
+            echo "Pruned old runs, kept last ${{ inputs.max_history_runs }}"
+          fi
+
+      - name: Write metadata.json
+        if: steps.check-existing.outputs.skip != 'true'
+        run: |
+          # `grep -c` prints the count AND exits non-zero on zero matches, so the
+          # old `|| echo 0` fired ON TOP of grep's own "0", yielding $'0\n0' and a
+          # `$((..))` "syntax error" that failed the report job on ALL-GREEN runs
+          # (SHY-0127). `VAR=$(grep ...) || VAR=0` keeps each value single-line:
+          # grep's "0"/"N" on success, reset to 0 on any non-zero (zero matches
+          # or missing file). set -e is not tripped — the `||` absorbs the exit.
+          PASSED=$(grep -c '"status":"passed"' allure-report/data/suites.json 2>/dev/null) || PASSED=0
+          FAILED=$(grep -c '"status":"failed"\|"status":"broken"' allure-report/data/suites.json 2>/dev/null) || FAILED=0
+          TOTAL=$((PASSED + FAILED))
+          DATE=$(date +%Y-%m-%d)
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          cat > allure-report/metadata.json <<METAEOF
+          {"passed":${PASSED},"failed":${FAILED},"total":${TOTAL},"date":"${DATE}","runUrl":"${RUN_URL}","runId":"${{ github.run_id }}","suite":"${{ inputs.suite_name }}","env":"${{ inputs.report_env }}"}
+          METAEOF
+
+      - name: Preserve history
+        if: steps.check-existing.outputs.skip != 'true'
+        run: |
+          mkdir -p allure-report/history
+          cp -r allure-report/history "gh-pages/${{ inputs.suite_name }}/${{ inputs.report_env }}/history" 2>/dev/null || true
+
+      - name: Trim report size (remove heavy attachments)
+        if: steps.check-existing.outputs.skip != 'true'
+        run: |
+          rm -rf allure-report/data/attachments 2>/dev/null || true
+          find allure-report/data/test-cases -type f -size +100k -delete 2>/dev/null || true
+          echo "Report size: $(du -sh allure-report | cut -f1)"
+
+      - name: Deploy report to GitHub Pages
+        # See test-backend.yml for full rationale: skip on dependabot
+        # PRs (read-only token + gh-pages race condition). Guard on
+        # github.head_ref so a merge commit added by a human doesn't
+        # bypass the skip (github.actor would resolve to the human).
+        if: steps.check-existing.outputs.skip != 'true' && !startsWith(github.head_ref, 'dependabot/')
+        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: allure-report
+          destination_dir: ${{ inputs.suite_name }}/${{ inputs.report_env }}/latest
+          keep_files: true
+
+      - name: Post report URL in summary
+        if: steps.check-existing.outputs.skip != 'true'
+        run: |
+          REPO="${{ github.repository }}"
+          OWNER="${REPO%%/*}"
+          echo "## Allure Report (${{ inputs.suite_name }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "[View Report](https://${OWNER}.github.io/${REPO##*/}/${{ inputs.suite_name }}/${{ inputs.report_env }}/latest/)" >> "$GITHUB_STEP_SUMMARY"

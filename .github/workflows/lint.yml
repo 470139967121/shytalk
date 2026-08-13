@@ -1,0 +1,157 @@
+name: Lint
+
+# Per-ref concurrency: newer commit on the same PR cancels in-progress
+# lint runs. Without this, an older commit's lint run holds the slot
+# and the newer commit's PR Checks queue can't fire (concurrency doesn't
+# propagate from caller pr-checks.yml into reusable workflows). Pinned
+# by express-api/tests/scripts/reusable-workflow-concurrency.test.js.
+concurrency:
+  group: lint-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Git ref to check out'
+        type: string
+        required: true
+      app_changed:
+        description: 'Whether app files changed'
+        type: boolean
+        required: true
+      backend_changed:
+        description: 'Whether backend files changed'
+        type: boolean
+        required: true
+      pr_body:
+        description: 'PR body, used to detect [allow-large-file] markers'
+        type: string
+        required: false
+        default: ''
+
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to lint (default: main)'
+        type: string
+        default: 'main'
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - name: Install ktlint
+        if: inputs.app_changed == true || github.event_name == 'workflow_dispatch'
+        run: |
+          curl -sSLO https://github.com/pinterest/ktlint/releases/download/1.8.0/ktlint
+          chmod +x ktlint
+          sudo mv ktlint /usr/local/bin/
+
+      - name: Run ktlint
+        if: inputs.app_changed == true || github.event_name == 'workflow_dispatch'
+        run: ktlint --relative
+
+      - name: Express lint (ESLint + Prettier)
+        if: inputs.backend_changed == true || github.event_name == 'workflow_dispatch'
+        run: |
+          cd express-api && npm ci
+          npm run lint
+          npm run format:check
+
+      - name: Gherkin lint
+        if: inputs.app_changed == true || github.event_name == 'workflow_dispatch'
+        run: bash .claude/hooks/check-gherkin.sh
+
+      # actionlint embeds shellcheck; together they catch unquoted globs,
+      # missing `set -euo pipefail`, `2>/dev/null || true` (SC2069), and the
+      # other silent-failure shapes that gave us a 7-week TestFlight outage
+      # 2026-03-12 → 2026-04-29. See feedback-larger-runners-paid.md and
+      # PR #372 audit notes for the full pattern catalogue.
+      - name: Install actionlint
+        run: |
+          set -euo pipefail
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) 1.7.7
+          sudo mv ./actionlint /usr/local/bin/
+          actionlint --version
+
+      - name: Run actionlint (workflow + embedded shellcheck)
+        run: |
+          set -euo pipefail
+          # -shellcheck=  passes shellcheck flags into embedded shellcheck.
+          # We disable SC2086 (intentional word-splitting on $RUNNER_TEMP)
+          # repo-wide because GH-managed paths are safe to leave unquoted
+          # in run: blocks where the alternative would be every reference
+          # gaining a quote. Other shellcheck rules apply normally.
+          actionlint -shellcheck='-e SC2086'
+
+      - name: No paid GitHub-hosted runner specs
+        run: bash scripts/check-no-paid-runners.sh
+
+      - name: Workflow concurrency groups are scoped or intentionally global
+        run: bash scripts/check-workflow-concurrency-scoping.sh
+
+      - name: Third-party GitHub Actions are SHA-pinned (supply-chain)
+        run: bash scripts/check-action-shas.sh
+
+      - name: HTML data-i18n keys all have JS translation definitions
+        run: bash scripts/check-orphan-i18n-keys.sh
+
+      - name: Release workflow contract (PR-flow + signed commits)
+        run: bash scripts/check-release-trigger.sh
+
+      # SHY-0108 (EPIC-0003 Phase X): ratchet guard — the in-process-double
+      # debt (jest.mock / Fake*Repository / page.route) may only SHRINK.
+      # Fails on any NEW double not in scripts/no-stubs-baseline.json, or a
+      # stale baseline entry left behind by a migration.
+      - name: No NEW in-process test doubles (EPIC-0003 ratchet)
+        run: node scripts/check-no-new-stubs.js
+
+      # SHY-0035: reject any file >5MB added in the diff vs main. Fetch
+      # origin/main explicitly because actions/checkout above checks out
+      # a single ref (no main reference). The fetch is cheap (commit graph
+      # only via filter, plus blob promise-on-demand for cat-file).
+      # PR body is passed through ALLOW_LARGE_FILE_BODY so [allow-large-file:
+      # <path> reason: ...] markers can exempt legitimate large assets per PR.
+      - name: Fetch origin/main for diff base
+        run: git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+
+      - name: Large-file guard (>5MB threshold)
+        # Source PR body via the explicit `pr_body` workflow_call input
+        # rather than `github.event.pull_request.body`. The latter would
+        # work in the `pull_request`-triggered top-level event (workflow_call
+        # inherits the caller's event context), but the explicit input is
+        # robust against future caller-workflow refactors (e.g. if lint.yml
+        # were ever called from a non-pull_request event such as a manual
+        # workflow_dispatch). Empty input → no exemptions → safe default.
+        env:
+          ALLOW_LARGE_FILE_BODY: ${{ inputs.pr_body }}
+        run: bash scripts/check-large-files.sh --against origin/main
+
+      # SHY user-story frontmatter validator — pinned LAST so a story-
+      # validation failure cannot mask earlier actionlint / shellcheck /
+      # SHA-pin / i18n / release-contract / large-file findings on the
+      # same PR. See CLAUDE.md § "Agile Way of Working" for the spec the
+      # validator enforces, and SHY-0001 for the rationale + DoD.
+      - name: Validate SHY story frontmatter
+        run: bash scripts/check-story-frontmatter.sh --scan .project/stories
+
+      # EPIC frontmatter validator — separate step from the SHY validator
+      # per SHY-0037 AC line 44 ("two `--scan` calls, not one combined").
+      # Runs structural + cross-corpus checks: EPIC ID collisions, unknown
+      # child SHY refs, duplicate child claims. See CLAUDE.md § "Agile Way
+      # of Working" → "### EPICs" for the spec.
+      - name: Validate EPIC frontmatter
+        run: bash scripts/check-epic-frontmatter.sh --scan .project/stories

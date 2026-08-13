@@ -1,0 +1,69 @@
+name: CodeQL Analysis
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly Monday 6am UTC
+
+permissions:
+  security-events: write
+  contents: read
+
+jobs:
+  analyze-javascript:
+    name: Analyze JavaScript
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v3
+        with:
+          languages: javascript
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v3
+        with:
+          category: /language:javascript
+
+  analyze-kotlin:
+    name: Analyze Kotlin
+    # Disabled: CodeQL's Kotlin extractor lags the Kotlin version this project compiles
+    # against. Re-enable by setting repository variable ENABLE_CODEQL_KOTLIN=true once
+    # GitHub publishes a compatible extractor. Track upstream at
+    # https://github.com/github/codeql-action.
+    # Using a repo var instead of `if: false` makes actionlint happy (constant `false`
+    # would otherwise trip if-cond) and allows toggling without a code change.
+    if: ${{ vars.ENABLE_CODEQL_KOTLIN == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: ./.github/actions/setup-jdk-gradle
+
+      - uses: ./.github/actions/decode-google-services
+        with:
+          dev-base64: ${{ secrets.GOOGLE_SERVICES_DEV_BASE64 }}
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v3
+        with:
+          languages: java-kotlin
+          build-mode: manual
+
+      - name: Build Kotlin project
+        run: ./gradlew assembleDevDebug --no-daemon -x lint -x test
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v3
+        with:
+          category: /language:java-kotlin
