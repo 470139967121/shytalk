@@ -64,7 +64,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Honour the optional `ref` input so the operator can deploy a
           # specific branch, tag (e.g. `v0.97.1`), or commit SHA. Falls
@@ -220,7 +220,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Honour the optional `ref` input so the operator can deploy a
           # specific branch, tag (e.g. `v0.97.1`), or commit SHA. Falls
@@ -275,7 +275,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Honour the optional `ref` input so the operator can deploy a
           # specific branch, tag (e.g. `v0.97.1`), or commit SHA. Falls
@@ -329,7 +329,7 @@ jobs:
 
       - name: Download cached APK
         if: steps.cached-apk.outputs.found == 'true'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: dev-release-apk
           path: dev-release-apk
@@ -431,7 +431,7 @@ jobs:
     # net for anything unexpected before the step timeouts fire.
     timeout-minutes: 100
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Honour the optional `ref` input so the operator can deploy a
           # specific branch, tag (e.g. `v0.97.1`), or commit SHA. Falls
@@ -726,7 +726,7 @@ jobs:
       # would need a separate ad-hoc-signed export whose profile lists the
       # target device UDIDs.
       - name: Upload IPA as workflow artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: dev-ios-ipa
           path: ${{ runner.temp }}/export/*.ipa
@@ -819,7 +819,7 @@ jobs:
     # well under the limit.
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Honour the optional `ref` input so the operator can deploy a
           # specific branch, tag (e.g. `v0.97.1`), or commit SHA. Falls
@@ -904,7 +904,7 @@ jobs:
     # warm runs complete much faster.
     timeout-minutes: 12
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref || github.ref }}
           fetch-depth: ${{ inputs.ref != '' && '0' || '1' }}
